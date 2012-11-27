@@ -1,0 +1,34 @@
+cmake_minimum_required(VERSION 2.7)	
+project(patchMatch)
+find_package(CUDA REQUIRED)
+
+
+set(OPENCV_INCLUDE "C:/Enliang/library_32/opencv/build/include/")
+set(OPENCV_LIB_PATH "C:/Enliang/library_32/opencv/build/x86/vc10/lib/")
+
+set(IMDEBUG_PATH "C:/Enliang/library_32/imdebug-1.13b-bin")
+
+set(CUDA_NVCC_FLAGS  -arch sm_20)
+
+include_directories(
+					${OPENCV_INCLUDE}
+					)
+link_directories(
+				${OPENCV_LIB_PATH}
+			)
+
+cuda_add_executable(patchMatch src/Image.h src/Image.cpp 
+						src/main.cpp
+						src/patchMatch.h src/patchMatch.cu
+						src/utility_CUDA.h
+						src/cudaArray_wrapper.h src/cudaArray_wrapper.cu
+						)
+
+
+
+target_link_libraries(patchMatch 
+						debug opencv_highgui242d.lib optimized opencv_highgui242.lib
+						debug opencv_core242d.lib	optimized opencv_core242.lib
+						
+					
+					)
