@@ -13,6 +13,8 @@ void main(int argc, char *argv[])
 		std::cout<< "cannot read Image list file" << std::endl;
 	}
 
+	PatchMatch pm(allImage);
+
 	
 
 }

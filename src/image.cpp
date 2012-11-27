@@ -17,6 +17,9 @@ void Image::updateCamParam(float *K, float *R, float *T, std::string imageFileNa
 	_proj = _K * _proj;	
 
 	_imageData = cv::imread(imageFileName);
+	//bool x = _imageData.isContinuous();
+	//char *xxx = (char*)_imageData.data + _imageData.step * 11;
+
 }
 
 bool readMiddleBurry(std::string fileName,  std::vector<Image> &allImages)
