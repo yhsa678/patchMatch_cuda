@@ -4,27 +4,25 @@
 #include "utility_CUDA.h"
 
 class CudaArray_wrapper
-{ 
-	cudaArray *_array3D;
+{ 	
 	int _width;
 	int _height;
 	int _depth;
 
 	//CudaArray_wrapper(){}
 public:
-	
+	cudaArray *_array3D;
+
 	CudaArray_wrapper(int width, int height, int depth);
 
 	template<typename T>  
-		void array3DCopy(char *img,  enum cudaMemcpyKind kind);
-			
+		void array3DCopy(unsigned char *img,  enum cudaMemcpyKind kind);			
 };
 
-template<typename T> void CudaArray_wrapper::array3DCopy(char *img,  enum cudaMemcpyKind kind)	// It must be one of cudaMemcpyHostToHost, cudaMemcpyHostToDevice, cudaMemcpyDeviceToHost, or cudaMemcpyDeviceToDevice
+template<typename T> void CudaArray_wrapper::array3DCopy(unsigned char *img,  enum cudaMemcpyKind kind)	// It must be one of cudaMemcpyHostToHost, cudaMemcpyHostToDevice, cudaMemcpyDeviceToHost, or cudaMemcpyDeviceToDevice
 {
 	if(kind == cudaMemcpyHostToDevice)
 	{
-
 		// Allocate depthmaps array.
 		cudaChannelFormatDesc fmt = cudaCreateChannelDesc<T>();	
 		struct cudaExtent extent = make_cudaExtent(_width, _height, _depth);	

@@ -1,5 +1,5 @@
 #include "Image.h"
-
+#include "opencv/cv.h"
 
 
 void Image::updateCamParam(float *K, float *R, float *T, std::string imageFileName)
@@ -17,8 +17,10 @@ void Image::updateCamParam(float *K, float *R, float *T, std::string imageFileNa
 	_proj = _K * _proj;	
 
 	_imageData = cv::imread(imageFileName);
-	//bool x = _imageData.isContinuous();
-	//char *xxx = (char*)_imageData.data + _imageData.step * 11;
+
+	// convert color image to grey image
+	cv::cvtColor(_imageData, _imageData, CV_BGR2GRAY);
+
 
 }
 

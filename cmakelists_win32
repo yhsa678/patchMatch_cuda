@@ -3,8 +3,8 @@ project(patchMatch)
 find_package(CUDA REQUIRED)
 
 
-set(OPENCV_INCLUDE "C:/Enliang/library_32/opencv/build/include/")
-set(OPENCV_LIB_PATH "C:/Enliang/library_32/opencv/build/x86/vc10/lib/")
+set(OPENCV_INCLUDE "F:/Enliang/library_32/opencv/build_32_v10/install/include/")
+set(OPENCV_LIB_PATH "F:/Enliang/library_32/opencv/build_32_v10/install/lib/")
 
 set(IMDEBUG_PATH "C:/Enliang/library_32/imdebug-1.13b-bin")
 
@@ -20,8 +20,9 @@ link_directories(
 cuda_add_executable(patchMatch src/Image.h src/Image.cpp 
 						src/main.cpp
 						src/patchMatch.h src/patchMatch.cu
-						src/utility_CUDA.h
+						src/utility_CUDA.h src/utility_CUDA.cpp
 						src/cudaArray_wrapper.h src/cudaArray_wrapper.cu
+						
 						)
 
 

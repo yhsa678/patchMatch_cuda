@@ -12,16 +12,18 @@ class PatchMatch
 public:
 
 	CudaArray_wrapper *_allImages_cudaArrayWrapper;
-	char *_imageDataBlock;
+	unsigned char *_imageDataBlock;
 
 	PatchMatch(const std::vector<Image> &allImage);
 	
 
 	~PatchMatch();
 	
-
+	void testTextureArray();
 
 };
+
+
 
 	 
 
