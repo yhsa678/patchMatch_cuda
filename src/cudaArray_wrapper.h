@@ -14,6 +14,8 @@ public:
 	cudaArray *_array3D;
 
 	CudaArray_wrapper(int width, int height, int depth);
+	~CudaArray_wrapper();
+	
 
 	template<typename T>  
 		void array3DCopy(unsigned char *img,  enum cudaMemcpyKind kind);			
@@ -24,10 +26,12 @@ template<typename T> void CudaArray_wrapper::array3DCopy(unsigned char *img,  en
 	if(kind == cudaMemcpyHostToDevice)
 	{
 		// Allocate depthmaps array.
-		cudaChannelFormatDesc fmt = cudaCreateChannelDesc<T>();	
 		struct cudaExtent extent = make_cudaExtent(_width, _height, _depth);	
-		CUDA_SAFE_CALL(cudaMalloc3DArray(&_array3D,&fmt,extent, cudaArrayLayered));	
-
+		if(_array3D == NULL)
+		{
+			cudaChannelFormatDesc fmt = cudaCreateChannelDesc<T>();				
+			CUDA_SAFE_CALL(cudaMalloc3DArray(&_array3D,&fmt,extent, cudaArrayLayered));	
+		}		
 		//struct cudaExtent extent = make_cudaExtent(_width, _height, _depth); //If a CUDA array is participating in the copy, the extent is defined in terms of that array's elements	
 		//copy data
 		struct cudaMemcpy3DParms params = {0};

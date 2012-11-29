@@ -31,3 +31,4 @@ void __cudaCheckError( const char *file, const int line )
 	}
 	return;
 }
+
