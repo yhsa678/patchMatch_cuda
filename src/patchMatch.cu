@@ -1,7 +1,7 @@
 #include "patchMatch.h"
 
 texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> allImgsTexture;
-
+texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> refImgTexture;
 
 PatchMatch::PatchMatch(const std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y): 
 	_imageDataBlock(NULL), _allImages_cudaArrayWrapper(NULL), _nearRange(nearRange), _farRange(farRange), _halfWindowSize(halfWindowSize),
@@ -82,20 +82,83 @@ void PatchMatch::run()
 
 #define N 32
 #define TARGETIMGS 20
+#define NUMOFSAMPLES 4
 
 inline __device__ float accessPitchMemory(float *data, int pitch, int row, int col)
 {
 	return *((float*)((char*)data + pitch*row) + col);
 }
 
-//inline __device__ float accessSPMap(float *SPMap, int pitch, int row, int col, int imageId )
-//{
-//	float *address = (char *)SPMap + 
-//
-//}
+inline __device__ void writePitchMemory(float *data, int pitch, int row, int col, float value )
+{
+	*((float*)((char*)data + pitch*row) + col) = value;
+}
+
+inline __device__ float drawRandNum(curandState *state, int statePitch, int col, int row, float rangeNear, float rangeFar)
+{
+	curandState *localStateAddr = (curandState *)((char*)state + row * statePitch) + col;	
+	curandState localState = *localStateAddr;
+	float randNum = curand_uniform(&localState) * (rangeFar - rangeNear) + rangeNear;
+	*localStateAddr = localState;
+	return randNum;
+}
+#define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
+#define SET_BIT(var,pos)( (var) |= (1 << (pos) ))
+
+inline __device__ void doTransform(float *col_prime, float *row_prime, float col, float row, int imageId)
+{
+
+
+}
+
+
+inline __device__ float computeNCC(int imageId, float centerRow, float centerCol, float depth, int halfWindowSize)
+{
+	float col_prime;
+	float row_prime;
+
+	float sum_I_I = 0;
+	float sum_I_Iprime = 0;
+	float sum_Iprime_Iprime = 0;
+	float sum_I = 0;
+	float sum_Iprime = 0;
+
+	for(float row = centerRow - halfWindowSize; row <= centerRow + halfWindowSize; row++) // y
+	{
+		for(float col = centerCol - halfWindowSize; col <= centerCol + halfWindowSize; col++) // x
+		{
+			float I = tex2DLayered( refImgTexture , col + 0.5f , row + 0.5f,  imageId);
+			// do transform to get the new position
+			
+			// 
+			doTransform(&col_prime, &row_prime,  col + 0.5f, row + 0.5f, imageId);
+			float Iprime = tex2DLayered(allImgsTexture, col_prime, row_prime, imageId);
+
+			sum_I_I += (I * I);
+			sum_Iprime_Iprime += (Iprime * Iprime);
+			sum_I_Iprime += (Iprime * I);
+			sum_I += I;
+			sum_Iprime += Iprime;
+		}
+	}	
+	float cost = (sum_I_I - 1/(2*halfWindowSize + 1) * sum_I * sum_I) * (sum_Iprime_Iprime - 1/(2*halfWindowSize + 1) * sum_Iprime * sum_Iprime );
+
+	if(cost == 0)
+		return -1;
+	else
+		return (sum_I_Iprime - 1/(2*halfWindowSize + 1) * sum_I * sum_Iprime )/cost;
+}
+
+inline __device__ int findMinCost(float *cost)
+{
+	int idx = cost[0] < cost[1]? 0:1;
+	cost[1] = cost[idx];
+	idx = cost[1] < cost[2]? 1:2;
+	return idx;
+}
 
 __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
-	int numOfSamples)
+	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize)
 {
 	int col = blockDim.x * blockIdx.x + threadIdx.x;
 	
@@ -103,18 +166,23 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 
 	if(col < refImageWidth)
 	{
-		__shared__ float depth_former[N];
-		__shared__ float depth_current[N];
+		__shared__ float depth_former_array[N];
+		__shared__ float depth_current_array[N];
 		__shared__ float sumOfSPMap[N];
 		__shared__ float normalizedSPMap[N * TARGETIMGS];
-		__shared__ int selectedImages[ (N * TARGETIMGS)>>7 + 1 ];
+		int s = (TARGETIMGS)>>7 + 1;
+		float * depth_former = &depth_former_array[0];
+		float * depth_current = &depth_current_array[0];
+		__shared__ int selectedImages[ N * ( TARGETIMGS >>7) + N ];
+
+		depth_former[threadId] = accessPitchMemory(depthMap, depthMapPitch, 0, col); 	
 		for( int row = 1; row < refImageHeight; ++row)
 		{
-			depth_former[threadId] = accessPitchMemory(depthMap, depthMapPitch, row - 1, col); 	
+			
 			depth_current[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col); 
 			sumOfSPMap[threadId] = 0;
-			int s = (N * TARGETIMGS)>>7 + 1;
-			if(threadId < s)
+			
+			if(threadId < N * s)
 				selectedImages[threadId] = 0;
 			__syncthreads();	
 			//---------------------------------
@@ -124,24 +192,60 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 				normalizedSPMap[threadId * i] = accessPitchMemory(SPMap,  SPMapPitch, row * TARGETIMGS + i, col)/ (sumOfSPMap[threadId] + FLT_MIN );	// devide by 0
 			for(int i = 1; i<TARGETIMGS; i++)
 				normalizedSPMap[threadId * i] += normalizedSPMap[threadId * (i-1)];
+			
 			// draw samples and set the bit to 0
+			float numOfTestedSamples = 0;
+			float cost[3] = {0.0f};
+			float randDepth = drawRandNum(randState, randStatePitch, col, row, depthRangeNear, depthRangeFar);
 			for(int j = 0; j < numOfSamples; j++)
 			{
-				float randNum = 0;
+				float randNum = drawRandNum(randState, randStatePitch, col, row, 0.0f, 1.0f);				
+				int imageId = -1;				
 				for(int i = 0; i < TARGETIMGS; i++)
 				{
 					if(randNum < normalizedSPMap[threadId * i])
 					{
-						// set the bit
-
-						// 
+						int stateByte = selectedImages[(i>>7) * N + threadId];
+						int pos = i - sizeof(int) * (i>>7);
+						// check the bit first and set imageId
+						bool state = CHECK_BIT(stateByte,pos);						
+						if(!state)
+						{
+							imageId = i;
+							numOfTestedSamples++;
+						}
+						// then set the bit
+						SET_BIT(stateByte, pos);
+						
 						break;
 					}
 				}
+				// image id is i( id != -1). Test the id using NCC, with 3 different depth. 
+				if(imageId != -1)
+				{
+					//computeNCC(int imageId, float centerRow, float centerCol, float depth, int halfWindowSize);
+					cost[0] =  computeNCC(imageId, (float)row, (float)col, depth_former[threadId], halfWindowSize);
+					cost[1] =  computeNCC(imageId, (float)row, (float)col, depth_current[threadId], halfWindowSize);
+					cost[2] =  computeNCC(imageId, (float)row, (float)col, randDepth, halfWindowSize);
+				}
+			}			
+
+			// find the minimum cost id, and then put cost into global memory 
+			int idx = findMinCost(cost);
+			if(idx == 0)
+				writePitchMemory(depthMap, depthMapPitch, row, col, depth_former[threadId] );
+			else if(idx ==1)
+				writePitchMemory(depthMap, depthMapPitch, row, col, depth_current[threadId] );
+			else
+				writePitchMemory(depthMap, depthMapPitch, row, col, randDepth );
+
+			// swap depth former and depth current
+			if(threadId == 0)
+			{
+				float *tempAddr = depth_former;
+				depth_former = depth_current;
+				depth_current = tempAddr;
 			}
-			// check all the bits and do testing with 3 different depth: depth_former, depth_current, and a random depth
-
-
 
 		}
 

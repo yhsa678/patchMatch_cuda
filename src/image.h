@@ -16,7 +16,17 @@ class Image{
 		cv::Mat _T; 	// T = -RC
 		cv::Mat _K;
 		cv::Mat _proj;	// Proj = KR[I,-C] = k[R,T]
+
+		cv::Mat _inverseK;
+		cv::Mat _inverseR;
+		cv::Mat _relative_R;
+		cv::Mat _relative_T;
+		cv::Mat _H1;
+		cv::Mat _H2;
+
 		void updateCamParam(float *K, float *R, float *T, std::string imageFileName);
+
+		void init_relative(const Image &refImg);
 
 		cv::Mat _imageData;
 

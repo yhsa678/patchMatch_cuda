@@ -1,6 +1,16 @@
 #include "Image.h"
 #include "opencv/cv.h"
 
+void Image::init_relative(const Image &refImg)
+{
+	_relative_R = _R * refImg._inverseR;
+	_relative_T = _R * (_C - refImg._C);
+
+	_H1 = _K * _relative_R * refImg._inverseK;
+	cv::Mat normalVector = (cv::Mat_<double>(1,3) << 0, 0, 1);
+	_H2 = _K * _relative_T * normalVector * refImg._inverseK;
+}
+
 
 void Image::updateCamParam(float *K, float *R, float *T, std::string imageFileName)
 {
@@ -15,6 +25,8 @@ void Image::updateCamParam(float *K, float *R, float *T, std::string imageFileNa
 		_proj.col(i) = _R.col(i) + 0;	
 	_proj.col(3) = _T + 0;
 	_proj = _K * _proj;	
+	cv::invert(_K, _inverseK); 
+	cv::transpose(_R, _inverseR);
 
 	_imageData = cv::imread(imageFileName);
 
@@ -55,3 +67,4 @@ bool readMiddleBurry(std::string fileName,  std::vector<Image> &allImages)
 	return true;
 
 }
+
