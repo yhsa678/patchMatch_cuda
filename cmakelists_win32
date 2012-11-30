@@ -21,8 +21,8 @@ cuda_add_executable(patchMatch src/Image.h src/Image.cpp
 						src/main.cpp
 						src/patchMatch.h src/patchMatch.cu
 						src/utility_CUDA.h src/utility_CUDA.cpp
-						src/cudaArray_wrapper.h src/cudaArray_wrapper.cu
-						
+						src/cudaArray_wrapper.h src/cudaArray_wrapper.cpp
+						src/array2d_wrapper.h src/array2d_wrapper.cu
 						)
 
 
@@ -30,6 +30,6 @@ cuda_add_executable(patchMatch src/Image.h src/Image.cpp
 target_link_libraries(patchMatch 
 						debug opencv_highgui242d.lib optimized opencv_highgui242.lib
 						debug opencv_core242d.lib	optimized opencv_core242.lib
-						
+						debug opencv_imgproc242d.lib optimized opencv_imgproc242.lib
 					
 					)
