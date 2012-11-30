@@ -80,6 +80,77 @@ void PatchMatch::run()
 
 }
 
+#define N 32
+#define TARGETIMGS 20
+
+inline __device__ float accessPitchMemory(float *data, int pitch, int row, int col)
+{
+	return *((float*)((char*)data + pitch*row) + col);
+}
+
+//inline __device__ float accessSPMap(float *SPMap, int pitch, int row, int col, int imageId )
+//{
+//	float *address = (char *)SPMap + 
+//
+//}
+
+__global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
+	int numOfSamples)
+{
+	int col = blockDim.x * blockIdx.x + threadIdx.x;
+	
+	int threadId = threadIdx.x;
+
+	if(col < refImageWidth)
+	{
+		__shared__ float depth_former[N];
+		__shared__ float depth_current[N];
+		__shared__ float sumOfSPMap[N];
+		__shared__ float normalizedSPMap[N * TARGETIMGS];
+		__shared__ int selectedImages[ (N * TARGETIMGS)>>7 + 1 ];
+		for( int row = 1; row < refImageHeight; ++row)
+		{
+			depth_former[threadId] = accessPitchMemory(depthMap, depthMapPitch, row - 1, col); 	
+			depth_current[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col); 
+			sumOfSPMap[threadId] = 0;
+			int s = (N * TARGETIMGS)>>7 + 1;
+			if(threadId < s)
+				selectedImages[threadId] = 0;
+			__syncthreads();	
+			//---------------------------------
+			for(int i = 0; i<TARGETIMGS; i++)
+				sumOfSPMap[threadId] += accessPitchMemory(SPMap,  SPMapPitch, row * TARGETIMGS + i, col);
+			for(int i = 0; i<TARGETIMGS; i++)
+				normalizedSPMap[threadId * i] = accessPitchMemory(SPMap,  SPMapPitch, row * TARGETIMGS + i, col)/ (sumOfSPMap[threadId] + FLT_MIN );	// devide by 0
+			for(int i = 1; i<TARGETIMGS; i++)
+				normalizedSPMap[threadId * i] += normalizedSPMap[threadId * (i-1)];
+			// draw samples and set the bit to 0
+			for(int j = 0; j < numOfSamples; j++)
+			{
+				float randNum = 0;
+				for(int i = 0; i < TARGETIMGS; i++)
+				{
+					if(randNum < normalizedSPMap[threadId * i])
+					{
+						// set the bit
+
+						// 
+						break;
+					}
+				}
+			}
+			// check all the bits and do testing with 3 different depth: depth_former, depth_current, and a random depth
+
+
+
+		}
+
+	}
+
+
+
+}
+
 
 
 __global__ void testTextureArray_kernel()
