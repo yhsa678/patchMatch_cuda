@@ -1,81 +1,134 @@
 #include "patchMatch.h"
 
+#define MAX_NUM_IMAGES 128
+
 texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> allImgsTexture;
 texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> refImgTexture;
+__constant__ float transformHH[MAX_NUM_IMAGES * 9 * 2];
 
-PatchMatch::PatchMatch(const std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y): 
-	_imageDataBlock(NULL), _allImages_cudaArrayWrapper(NULL), _nearRange(nearRange), _farRange(farRange), _halfWindowSize(halfWindowSize),
-		_blockDim_x(blockDim_x), _blockDim_y(blockDim_y)
+void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 {
-	_numOfImages = allImage.size();
-	if(_numOfImages == 0)
+	//input the data and extract consective data block
+	int numOfChannels =  allImage[0]._imageData.channels();
+	_maxWidth = 0;
+	_maxHeight = 0;
+	for(unsigned int i = 0; i < allImage.size(); i++)
+	{
+		if(i != referenceId)
+		{
+			if(allImage[i]._imageData.cols > _maxWidth)
+			{
+				_maxWidth = allImage[i]._imageData.cols;
+			}
+			if(allImage[i]._imageData.rows > _maxHeight)
+			{
+				_maxHeight = allImage[i]._imageData.rows;
+			}
+		}	
+	}
+	// ---------- assign memory, copy data
+	int sizeOfBlock = _maxWidth * numOfChannels * _maxHeight  * _numOfTargetImages;
+	_imageDataBlock = new unsigned char[sizeOfBlock]();
+	// copy row by row
+	//char *dest = _imageDataBlock;
+	int dataBlockId = 0;
+	for(unsigned int i = 0; i < allImage.size(); i++)
+	{	
+		if(i != referenceId)
+		{
+			unsigned char *dest = _imageDataBlock + (_maxWidth * numOfChannels * _maxHeight) * dataBlockId ;
+			unsigned char *source = allImage[i]._imageData.data;
+
+			for( int j = 0; j < _maxHeight; j++)
+			{
+				if(j < allImage[i]._imageData.rows)
+				{
+					memcpy( (void *)dest, (void *)source, allImage[i]._imageData.rows * allImage[i]._imageData.cols * numOfChannels * sizeof(unsigned char));	
+
+					dest += (_maxWidth * numOfChannels);
+					source += allImage[i]._imageData.step;
+				}			
+			}
+			++dataBlockId;
+		}
+	}
+	
+	// for the reference image
+	_refWidth = allImage[referenceId]._imageData.cols;
+	_refHeight = allImage[referenceId]._imageData.rows;
+	if(numOfChannels != allImage[referenceId]._imageData.channels())
+	{ std::cout<< "reference Image has different number of channels with target images"<< std::endl; 
+	 exit(EXIT_FAILURE);}
+	_refImageDataBlock = new unsigned char[_refWidth * _refHeight * numOfChannels]; 
+	if( allImage[referenceId]._imageData.isContinuous())
+		memcpy((void *)_refImageDataBlock, allImage[referenceId]._imageData.data, _refWidth * _refHeight * numOfChannels * sizeof(unsigned char));
+	else
+	{
+		unsigned char *dest = _refImageDataBlock;
+		unsigned char *source = allImage[referenceId]._imageData.data;
+		for(int i = 0; i < _refHeight; i++)
+		{
+			memcpy((void*)dest, (void*)source,  _refWidth * _refHeight * numOfChannels * sizeof(unsigned char) );	
+			source += allImage[i]._imageData.step;
+			dest += (_refWidth * numOfChannels);
+		}
+	}
+
+
+	_transformHH = new float[18 * _numOfTargetImages];
+	int offset = 0;
+	for(int i = 0; i< allImage.size(); i++)
+	{
+		if(i != referenceId)
+		{
+			memcpy((void*)(_transformHH+offset), (void*)allImage[i]._H1.data, 18 * sizeof(float));
+			offset += 18;
+			memcpy((void*)(_transformHH+offset), (void*)allImage[i]._H2.data, 18 * sizeof(float));
+			offset += 18;
+		}
+	}
+
+} 
+
+PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId): 
+	_imageDataBlock(NULL), _allImages_cudaArrayWrapper(NULL), _nearRange(nearRange), _farRange(farRange), _halfWindowSize(halfWindowSize), _blockDim_x(blockDim_x), _blockDim_y(blockDim_y), _refImageId(refImageId)
+{
+	_numOfTargetImages = allImage.size() - 1;
+	if(_numOfTargetImages == 0)
 	{
 		std::cout<< "Error: there is no images" << std::endl;
 		exit(EXIT_FAILURE);
 	}
+	// using reference image id to update H1 and H2 for each image
+	for(unsigned int i = 0; i < allImage.size(); i++)
+		allImage[i].init_relative( allImage[refImageId] );
 
 	// find maximum size of each dimension
-	int numOfChannels =  allImage[0]._imageData.channels();
-	int maxWidth = allImage[0]._imageData.cols; 
-	int maxHeight = allImage[0]._imageData.rows;
-	for(unsigned int i = 1; i < allImage.size(); i++)
-	{
-		if(allImage[i]._imageData.cols > maxWidth)
-		{
-			maxWidth = allImage[i]._imageData.cols;
-		}
-		if(allImage[i]._imageData.rows > maxHeight)
-		{
-			maxHeight = allImage[i]._imageData.rows;
-		}
-	}
-	// ---------- assign memory, copy data
-	int sizeOfBlock = maxWidth * numOfChannels * maxHeight  * _numOfImages;
-	_imageDataBlock = new unsigned char[sizeOfBlock]();
-	// copy row by row
-	//char *dest = _imageDataBlock;
-	for(unsigned int i = 0; i < allImage.size(); i++)
-	{	
-		unsigned char *dest = _imageDataBlock + (maxWidth * numOfChannels * maxHeight) * i;
-		unsigned char *source = allImage[i]._imageData.data;
-
-		for( int j = 0; j < maxHeight; j++)
-		{
-			if(j < allImage[i]._imageData.rows)
-			{
-				memcpy( (void *)dest, (void *)source, allImage[i]._imageData.step * sizeof(unsigned char));	
-
-				dest += (maxWidth * numOfChannels);
-				source += allImage[i]._imageData.step;
-			}			
-		}
-	}
-	
+	copyData(allImage, _refImageId);	
 	// ---------- initialize array
-	_allImages_cudaArrayWrapper = new CudaArray_wrapper(maxWidth, maxHeight, _numOfImages);
-
+	_allImages_cudaArrayWrapper = new CudaArray_wrapper(_maxWidth, _maxHeight, _numOfTargetImages);
+	_refImages_cudaArrayWrapper = new CudaArray_wrapper(_refWidth, _refHeight, 1);
 	// ---------- upload image data to GPU
 	_allImages_cudaArrayWrapper->array3DCopy<unsigned char>(_imageDataBlock, cudaMemcpyHostToDevice);
+	_refImages_cudaArrayWrapper->array3DCopy<unsigned char>(_refImageDataBlock, cudaMemcpyHostToDevice);
 	// attach to texture so that the kernel can access the data
-	/*cudaChannelFormatDesc fmt;
-	cudaGetChannelDesc(&fmt, _allImages_cudaArrayWrapper->_array3D);*/
 	allImgsTexture.addressMode[0] = cudaAddressModeWrap; allImgsTexture.addressMode[1] = cudaAddressModeClamp; 
 	allImgsTexture.filterMode = cudaFilterModeLinear;	allImgsTexture.normalized = false;
 	CUDA_SAFE_CALL(cudaBindTextureToArray(allImgsTexture, _allImages_cudaArrayWrapper->_array3D));	// bind to texture	
-
 	
+	refImgTexture.addressMode[0] = cudaAddressModeWrap; refImgTexture.addressMode[1] = cudaAddressModeClamp; 
+	refImgTexture.filterMode = cudaFilterModeLinear;	refImgTexture.normalized = false;
+	CUDA_SAFE_CALL(cudaBindTextureToArray(refImgTexture, _refImages_cudaArrayWrapper->_array3D));	// bind to
+	
+	// upload H matrix
+	cudaMemcpyToSymbol("transformHH", _transformHH , sizeof(float) * 18 * _numOfTargetImages, 0, cudaMemcpyHostToDevice);
 
-
-	// testing
-	testTextureArray();
-
-	// prepare for the depth data
 }
 
 void PatchMatch::run()
 {
 	// ---------- initialize depthmap and SPM (selection probability map)
-	//_depthMap = new Array2D_wrapper(maxWidth, maxHeight, _blockDim_x, _blockDim_y);
+	//_depthMap = new Array2D_wrapper(_maxWidth, _maxHeight, _blockDim_x, _blockDim_y);
 	//
 
 }
@@ -105,9 +158,12 @@ inline __device__ float drawRandNum(curandState *state, int statePitch, int col,
 #define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
 #define SET_BIT(var,pos)( (var) |= (1 << (pos) ))
 
-inline __device__ void doTransform(float *col_prime, float *row_prime, float col, float row, int imageId)
+inline __device__ void doTransform(float *col_prime, float *row_prime, float col, float row, int imageId, float depth)
 {
-
+	float *base = &transformHH[0] +  18 * imageId ;
+	float z = (base[6] - base[15]/depth) * col + (base[7] - base[16]/depth) * row + (base[8] - base[17]/depth);
+	*col_prime = ((base[0] - base[9]/depth) * col + (base[1] - base[10]/depth) * row + (base[2] - base[11]/depth))/z;
+	*row_prime = ((base[3] - base[12]/depth) * col + (base[4] - base[13]/depth) * row + (base[5] - base[14]/depth))/z;
 
 }
 
@@ -131,7 +187,7 @@ inline __device__ float computeNCC(int imageId, float centerRow, float centerCol
 			// do transform to get the new position
 			
 			// 
-			doTransform(&col_prime, &row_prime,  col + 0.5f, row + 0.5f, imageId);
+			doTransform(&col_prime, &row_prime,  col + 0.5f, row + 0.5f, imageId, depth);
 			float Iprime = tex2DLayered(allImgsTexture, col_prime, row_prime, imageId);
 
 			sum_I_I += (I * I);
@@ -251,8 +307,6 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 
 	}
 
-
-
 }
 
 
@@ -308,6 +362,11 @@ PatchMatch::~PatchMatch()
 {
 	if(_imageDataBlock != NULL)
 		delete []_imageDataBlock;
+	if(_refImageDataBlock != NULL)
+		delete []_refImageDataBlock;
+	if(_transformHH != NULL)
+		delete []_transformHH;
+
 	if(_allImages_cudaArrayWrapper != NULL)
 		delete _allImages_cudaArrayWrapper;
 }
