@@ -104,7 +104,8 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 		allImage[i].init_relative( allImage[refImageId] );
 
 	// find maximum size of each dimension
-	copyData(allImage, _refImageId);	
+	copyData(allImage, _refImageId);
+	
 	// ---------- initialize array
 	_allImages_cudaArrayWrapper = new CudaArray_wrapper(_maxWidth, _maxHeight, _numOfTargetImages);
 	_refImages_cudaArrayWrapper = new CudaArray_wrapper(_refWidth, _refHeight, 1);
@@ -246,7 +247,7 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 				sumOfSPMap[threadId] += accessPitchMemory(SPMap,  SPMapPitch, row * TARGETIMGS + i, col);
 			for(int i = 0; i<TARGETIMGS; i++)
 				normalizedSPMap[threadId * i] = accessPitchMemory(SPMap,  SPMapPitch, row * TARGETIMGS + i, col)/ (sumOfSPMap[threadId] + FLT_MIN );	// devide by 0
-			for(int i = 1; i<TARGETIMGS; i++)
+			for(int i = 1; i<TARGETIMGS; i++)		//****
 				normalizedSPMap[threadId * i] += normalizedSPMap[threadId * (i-1)];
 			
 			// draw samples and set the bit to 0
