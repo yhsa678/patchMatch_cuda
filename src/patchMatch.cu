@@ -92,7 +92,7 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 
 PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId): 
 	_imageDataBlock(NULL), _allImages_cudaArrayWrapper(NULL), _nearRange(nearRange), _farRange(farRange), _halfWindowSize(halfWindowSize), _blockDim_x(blockDim_x), _blockDim_y(blockDim_y), _refImageId(refImageId),
-		_depthMap(NULL), _SPMap(NULL)
+		_depthMap(NULL), _SPMap(NULL), _psngState(NULL)
 {
 	_numOfTargetImages = allImage.size() - 1;
 	if(_numOfTargetImages == 0)
@@ -125,6 +125,12 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 	// upload H matrix
 	cudaMemcpyToSymbol("transformHH", _transformHH , sizeof(float) * 18 * _numOfTargetImages, 0, cudaMemcpyHostToDevice);
 
+	// initialize depthmap and SP(selection probability) map
+	_depthMap = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y);
+	_SPMap = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y, _numOfTargetImages);
+	_psngState = new Array2D_psng(_refWidth, _refHeight, _blockDim_x, _blockDim_y);
+	_depthMap->randNumGen(_nearRange, _farRange, _psngState->_array2D, _psngState->_pitchData);
+	_SPMap->randNumGen(0.0f, 1.0f, _psngState->_array2D, _psngState->_pitchData); 
 }
 
 PatchMatch::~PatchMatch()
@@ -142,20 +148,28 @@ PatchMatch::~PatchMatch()
 		delete _SPMap;
 	if(_depthMap != NULL)
 		delete _depthMap;
-
+	if(_psngState != NULL)
+		delete _psngState;
 }
 
 void PatchMatch::run()
 {
-	// ---------- initialize depthmap and SPM (selection probability map)
-	_depthMap = new Array2D_wrapper(_refWidth, _refHeight, _blockDim_x, _blockDim_y);
-	_depthMap->randStateGen();
-	_depthMap->randNumGen(_nearRange, _farRange);
-	//_SPMap = new Array2D_wrapper(_refWidth, _refHeight * _numOfTargetImages, _blockDim_x, _blockDim_y);	
-	
-	//
+
+	for(int i = 0; i<3; i++)
+	{
+	// left to right sweep
 
 
+	// top to bottom sweep 
+
+
+
+	// right to left sweep
+
+
+	// bottom to top sweep
+
+	}
 
 }
 

@@ -4,6 +4,7 @@
 #include <cuda_runtime.h>
 #include "cudaArray_wrapper.h"
 #include "array2d_wrapper.h"
+#include "array2d_psng.h"
 #include <vector>
 #include <iostream>
 #include "image.h"
@@ -22,8 +23,9 @@ public:
 	CudaArray_wrapper *_allImages_cudaArrayWrapper;
 	CudaArray_wrapper *_refImages_cudaArrayWrapper;
 
-	Array2D_wrapper * _depthMap;
-	Array2D_wrapper * _SPMap; // selection probability map
+	Array2D_wrapper<float> * _depthMap;
+	Array2D_wrapper<float> * _SPMap; // selection probability map
+	Array2D_psng *_psngState;
 	
 	
 	int _numOfTargetImages;
