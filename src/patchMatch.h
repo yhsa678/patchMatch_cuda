@@ -24,7 +24,10 @@ public:
 	CudaArray_wrapper *_refImages_cudaArrayWrapper;
 
 	Array2D_wrapper<float> * _depthMap;
+	Array2D_wrapper<float> * _depthMapT;
 	Array2D_wrapper<float> * _SPMap; // selection probability map
+	Array2D_wrapper<float> * _SPMapT;
+
 	Array2D_psng *_psngState;
 	
 	
@@ -48,8 +51,9 @@ public:
 	void testTextureArray();
 
 private:
-	void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId);
-
+	void copyData(const std::vector<Image> &allImage, int referenceId);
+	void transposeForward();
+	void transposeBack();
 };
 
 

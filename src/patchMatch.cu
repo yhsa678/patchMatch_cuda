@@ -1,4 +1,5 @@
 #include "patchMatch.h"
+#include "cudaTranspose.h"
 
 #define MAX_NUM_IMAGES 128
 
@@ -92,7 +93,7 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 
 PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId): 
 	_imageDataBlock(NULL), _allImages_cudaArrayWrapper(NULL), _nearRange(nearRange), _farRange(farRange), _halfWindowSize(halfWindowSize), _blockDim_x(blockDim_x), _blockDim_y(blockDim_y), _refImageId(refImageId),
-		_depthMap(NULL), _SPMap(NULL), _psngState(NULL)
+		_depthMap(NULL), _SPMap(NULL), _psngState(NULL), _depthMapT(NULL), _SPMapT(NULL)
 {
 	_numOfTargetImages = allImage.size() - 1;
 	if(_numOfTargetImages == 0)
@@ -131,6 +132,9 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 	_psngState = new Array2D_psng(_refWidth, _refHeight, _blockDim_x, _blockDim_y);
 	_depthMap->randNumGen(_nearRange, _farRange, _psngState->_array2D, _psngState->_pitchData);
 	_SPMap->randNumGen(0.0f, 1.0f, _psngState->_array2D, _psngState->_pitchData); 
+
+	_depthMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y);
+	_SPMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y, _numOfTargetImages);
 }
 
 PatchMatch::~PatchMatch()
@@ -150,6 +154,25 @@ PatchMatch::~PatchMatch()
 		delete _depthMap;
 	if(_psngState != NULL)
 		delete _psngState;
+	if(_SPMapT != NULL)
+		delete _SPMapT;
+	if(_depthMapT != NULL)
+		delete _depthMapT;
+}
+
+void PatchMatch::transposeForward()
+{
+	//transpose2dData(float * input, float *output, int width, int height, int pitchInput, int pitchOutput);
+
+	cudaTranspose::transpose2dData( _depthMap->_array2D, _depthMapT->_array2D, _depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_pitchData, _depthMapT->_pitchData);
+	
+
+}
+
+void PatchMatch::transposeBack()
+{
+
+
 }
 
 void PatchMatch::run()
@@ -158,7 +181,10 @@ void PatchMatch::run()
 	for(int i = 0; i<3; i++)
 	{
 	// left to right sweep
+//-----------------------------------------------------------
+	
 
+//-----------------------------------------------------------
 
 	// top to bottom sweep 
 
@@ -326,7 +352,6 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 					cost[2] +=  computeNCC(imageId, (float)row, (float)col, randDepth, halfWindowSize);
 				}
 			}			
-
 			// find the minimum cost id, and then put cost into global memory 
 			int idx = findMinCost(cost);
 			if(idx == 0)
@@ -343,11 +368,8 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 				depth_former = depth_current;
 				depth_current = tempAddr;
 			}
-
 		}
-
 	}
-
 }
 
 

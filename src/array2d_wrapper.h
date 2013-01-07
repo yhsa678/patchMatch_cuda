@@ -27,6 +27,9 @@ public:
 			CUDA_SAFE_CALL(cudaFree((void *) _array2D));
 	}
 	void randNumGen(float rangeStart, float rangeEnd, curandState * devStates, int pitchState);
+	size_t getWidth();
+	size_t getHeight();
+	size_t getDepth();
 
 
 protected:
@@ -42,6 +45,24 @@ protected:
 	dim3 _gridSize;
 
 };
+
+template<class T>
+size_t Array2D_wrapper<T> :: getHeight()
+{
+	return _height;
+}
+
+template<class T>
+size_t Array2D_wrapper<T> :: getWidth()
+{
+	return _width;
+}
+
+template<class T>
+size_t Array2D_wrapper<T> :: getDepth()
+{
+	return _depth;
+}
 
 template<class T>
 void Array2D_wrapper<T> :: randNumGen(float rangeStart, float rangeEnd, curandState * devStates, int pitchState)
