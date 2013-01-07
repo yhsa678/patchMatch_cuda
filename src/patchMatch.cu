@@ -91,7 +91,8 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 } 
 
 PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId): 
-	_imageDataBlock(NULL), _allImages_cudaArrayWrapper(NULL), _nearRange(nearRange), _farRange(farRange), _halfWindowSize(halfWindowSize), _blockDim_x(blockDim_x), _blockDim_y(blockDim_y), _refImageId(refImageId)
+	_imageDataBlock(NULL), _allImages_cudaArrayWrapper(NULL), _nearRange(nearRange), _farRange(farRange), _halfWindowSize(halfWindowSize), _blockDim_x(blockDim_x), _blockDim_y(blockDim_y), _refImageId(refImageId),
+		_depthMap(NULL), _SPMap(NULL)
 {
 	_numOfTargetImages = allImage.size() - 1;
 	if(_numOfTargetImages == 0)
@@ -126,13 +127,39 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 
 }
 
+PatchMatch::~PatchMatch()
+{
+	if(_imageDataBlock != NULL)
+		delete []_imageDataBlock;
+	if(_refImageDataBlock != NULL)
+		delete []_refImageDataBlock;
+	if(_transformHH != NULL)
+		delete []_transformHH;
+
+	if(_allImages_cudaArrayWrapper != NULL)
+		delete _allImages_cudaArrayWrapper;
+	if(_SPMap != NULL)
+		delete _SPMap;
+	if(_depthMap != NULL)
+		delete _depthMap;
+
+}
+
 void PatchMatch::run()
 {
 	// ---------- initialize depthmap and SPM (selection probability map)
-	//_depthMap = new Array2D_wrapper(_maxWidth, _maxHeight, _blockDim_x, _blockDim_y);
+	_depthMap = new Array2D_wrapper(_refWidth, _refHeight, _blockDim_x, _blockDim_y);
+	_depthMap->randStateGen();
+	_depthMap->randNumGen(_nearRange, _farRange);
+	//_SPMap = new Array2D_wrapper(_refWidth, _refHeight * _numOfTargetImages, _blockDim_x, _blockDim_y);	
+	
 	//
 
+
+
 }
+
+
 
 #define N 32
 #define TARGETIMGS 20
@@ -223,31 +250,31 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 
 	if(col < refImageWidth)
 	{
-		__shared__ float depth_former_array[N];
-		__shared__ float depth_current_array[N];
-		__shared__ float sumOfSPMap[N];
-		__shared__ float normalizedSPMap[N * TARGETIMGS];
-		int s = (TARGETIMGS)>>7 + 1;
+		__shared__ float depth_former_array[N]; 
+		__shared__ float depth_current_array[N]; 
+		__shared__ float sumOfSPMap[N]; 
+		__shared__ float normalizedSPMap[N * TARGETIMGS]; // need plus 1 here ****
+		int s = (TARGETIMGS)>>7 + 1; // 7 is because each int type has 32 bits, and divided by 32 is equavalent to shift 32. s is number of bytes used to save selected images
 		float * depth_former = &depth_former_array[0];
 		float * depth_current = &depth_current_array[0];
 		__shared__ int selectedImages[ N * ( TARGETIMGS >>7) + N ];
 
-		depth_former[threadId] = accessPitchMemory(depthMap, depthMapPitch, 0, col); 	
+		depth_former[threadId] = accessPitchMemory(depthMap, depthMapPitch, 0, col); 	// depth for 1st element
 		for( int row = 1; row < refImageHeight; ++row)
 		{
-			
 			depth_current[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col); 
 			sumOfSPMap[threadId] = 0;
 			
-			if(threadId < N * s)
-				selectedImages[threadId] = 0;
+			if(threadId < N * s) // fix N = 32
+				selectedImages[threadId] = 0;	// initialized to false
 			__syncthreads();	
 			//---------------------------------
 			for(int i = 0; i<TARGETIMGS; i++)
 				sumOfSPMap[threadId] += accessPitchMemory(SPMap,  SPMapPitch, row * TARGETIMGS + i, col);
-			for(int i = 0; i<TARGETIMGS; i++)
-				normalizedSPMap[threadId * i] = accessPitchMemory(SPMap,  SPMapPitch, row * TARGETIMGS + i, col)/ (sumOfSPMap[threadId] + FLT_MIN );	// devide by 0
-			for(int i = 1; i<TARGETIMGS; i++)		//****
+			if(threadId < N)
+				for(int i = 0; i<TARGETIMGS; i++)
+					normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap,  SPMapPitch, row * TARGETIMGS + i, col) / (sumOfSPMap[threadId] + FLT_MIN );	// devide by 0
+			for(int i = 1; i<TARGETIMGS; i++)		//**** accumulate?
 				normalizedSPMap[threadId * i] += normalizedSPMap[threadId * (i-1)];
 			
 			// draw samples and set the bit to 0
@@ -260,12 +287,12 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 				int imageId = -1;				
 				for(int i = 0; i < TARGETIMGS; i++)
 				{
-					if(randNum < normalizedSPMap[threadId * i])
+					if(randNum < normalizedSPMap[i + threadId * N])
 					{
 						int stateByte = selectedImages[(i>>7) * N + threadId];
 						int pos = i - sizeof(int) * (i>>7);
 						// check the bit first and set imageId
-						bool state = CHECK_BIT(stateByte,pos);						
+						bool state = CHECK_BIT(stateByte,pos);
 						if(!state)
 						{
 							imageId = i;
@@ -273,7 +300,6 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 						}
 						// then set the bit
 						SET_BIT(stateByte, pos);
-						
 						break;
 					}
 				}
@@ -281,9 +307,9 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 				if(imageId != -1)
 				{
 					//computeNCC(int imageId, float centerRow, float centerCol, float depth, int halfWindowSize);
-					cost[0] =  computeNCC(imageId, (float)row, (float)col, depth_former[threadId], halfWindowSize);
-					cost[1] =  computeNCC(imageId, (float)row, (float)col, depth_current[threadId], halfWindowSize);
-					cost[2] =  computeNCC(imageId, (float)row, (float)col, randDepth, halfWindowSize);
+					cost[0] +=  computeNCC(imageId, (float)row, (float)col, depth_former[threadId], halfWindowSize);
+					cost[1] +=  computeNCC(imageId, (float)row, (float)col, depth_current[threadId], halfWindowSize);
+					cost[2] +=  computeNCC(imageId, (float)row, (float)col, randDepth, halfWindowSize);
 				}
 			}			
 
@@ -359,15 +385,3 @@ void PatchMatch::testTextureArray()
 }
 
 
-PatchMatch::~PatchMatch()
-{
-	if(_imageDataBlock != NULL)
-		delete []_imageDataBlock;
-	if(_refImageDataBlock != NULL)
-		delete []_refImageDataBlock;
-	if(_transformHH != NULL)
-		delete []_transformHH;
-
-	if(_allImages_cudaArrayWrapper != NULL)
-		delete _allImages_cudaArrayWrapper;
-}

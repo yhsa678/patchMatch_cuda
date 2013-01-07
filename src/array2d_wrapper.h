@@ -7,10 +7,11 @@
 class Array2D_wrapper{
 public:
 	float *_array2D;
-	Array2D_wrapper(int width, int height, int blockDim_x, int blockDim_y):
-			_width(width), _height(height), _blockDim_x(blockDim_x), _blockDim_y(blockDim_y)
+	Array2D_wrapper(int width, int height, int blockDim_x, int blockDim_y, int depth = 1):
+			_width(width), _height(height), _blockDim_x(blockDim_x), _blockDim_y(blockDim_y),
+				_depth(depth)
 	{
-		CUDA_SAFE_CALL(  cudaMallocPitch((void**)&_array2D, &_pitchData, _width * sizeof(float), _height));
+		CUDA_SAFE_CALL(  cudaMallocPitch((void**)&_array2D, &_pitchData, _width * sizeof(float), _height * _depth));
 		// compute grid and block size
 		computeCUDAConfig();
 		++_referenceCount;
@@ -39,6 +40,7 @@ public:
 private:
 	size_t _width;
 	size_t _height;
+	size_t _depth;
 	size_t _pitchData;
 	size_t _pitchState;
 
