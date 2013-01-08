@@ -78,7 +78,7 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 
 	_transformHH = new float[18 * _numOfTargetImages];
 	int offset = 0;
-	for(int i = 0; i< allImage.size(); i++)
+	for(unsigned int i = 0; i< allImage.size(); i++)
 	{
 		if(i != referenceId)
 		{
@@ -160,19 +160,31 @@ PatchMatch::~PatchMatch()
 		delete _depthMapT;
 }
 
-void PatchMatch::transposeForward()
+void PatchMatch::transpose(Array2D_wrapper<float> *input, Array2D_wrapper<float> *output)
 {
 	//transpose2dData(float * input, float *output, int width, int height, int pitchInput, int pitchOutput);
+	//tp.transpose2dData(input_device + i * inputPitch * height/sizeof(float), output_device + i * outputPitch * width/sizeof(float), width, height,inputPitch, outputPitch );
 
-	cudaTranspose::transpose2dData( _depthMap->_array2D, _depthMapT->_array2D, _depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_pitchData, _depthMapT->_pitchData);
+	//cudaTranspose::transpose2dData( _depthMap->_array2D, _depthMapT->_array2D, _depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_pitchData, _depthMapT->_pitchData);
 	
-
+	for(unsigned int d = 0; d < _depthMap->getDepth(); d++)
+	{
+		cudaTranspose::transpose2dData( input->_array2D + d * input->_pitchData * input->getHeight(),
+										output->_array2D + d * output->_pitchData * output->getHeight(),
+										input->getWidth(), input->getHeight(), output->_pitchData, output->_pitchData);
+	}
 }
 
-void PatchMatch::transposeBack()
+void PatchMatch::transposeForward()
 {
+	transpose(_depthMap, _depthMapT);
+	transpose(_SPMap, _SPMapT);
+}
 
-
+void PatchMatch::transposeBackward()
+{
+	transpose(_depthMapT, _depthMap);
+	transpose(_SPMapT, _SPMap);
 }
 
 void PatchMatch::run()
@@ -182,24 +194,23 @@ void PatchMatch::run()
 	{
 	// left to right sweep
 //-----------------------------------------------------------
-	
+		transposeForward();
 
 //-----------------------------------------------------------
-
 	// top to bottom sweep 
-
-
+		transposeBackward();
 
 	// right to left sweep
-
+		transposeForward();
 
 	// bottom to top sweep
 
+		transposeBackward();
 	}
 
+	// in the end I got the depthmap
+
 }
-
-
 
 #define N 32
 #define TARGETIMGS 20
@@ -223,6 +234,7 @@ inline __device__ float drawRandNum(curandState *state, int statePitch, int col,
 	*localStateAddr = localState;
 	return randNum;
 }
+
 #define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
 #define SET_BIT(var,pos)( (var) |= (1 << (pos) ))
 
@@ -236,7 +248,8 @@ inline __device__ void doTransform(float *col_prime, float *row_prime, float col
 }
 
 
-inline __device__ float computeNCC(int imageId, float centerRow, float centerCol, float depth, int halfWindowSize)
+inline __device__ float computeNCC(int imageId, float centerRow, float centerCol, float depth, int halfWindowSize, bool isRotated)
+	// here the return resutls are 1-NCC, so the range is [0, 2], the smaller value, the better color consistency
 {
 	float col_prime;
 	float row_prime;
@@ -252,11 +265,14 @@ inline __device__ float computeNCC(int imageId, float centerRow, float centerCol
 		for(float col = centerCol - halfWindowSize; col <= centerCol + halfWindowSize; col++) // x
 		{
 			float I = tex2DLayered( refImgTexture , col + 0.5f , row + 0.5f,  imageId);
+
 			// do transform to get the new position
-			
-			// 
-			doTransform(&col_prime, &row_prime,  col + 0.5f, row + 0.5f, imageId, depth);
-			float Iprime = tex2DLayered(allImgsTexture, col_prime, row_prime, imageId);
+			if(!isRotated)
+				doTransform(&col_prime, &row_prime, col + 0.5f, row + 0.5f, imageId, depth);
+			else
+				doTransform(&col_prime, &row_prime, row + 0.5f, col + 0.5f, imageId, depth);
+
+			float Iprime = tex2DLayered(allImgsTexture, col_prime, row_prime, imageId); // textures are not rotated
 
 			sum_I_I += (I * I);
 			sum_Iprime_Iprime += (Iprime * Iprime);
@@ -268,9 +284,9 @@ inline __device__ float computeNCC(int imageId, float centerRow, float centerCol
 	float cost = (sum_I_I - 1/(2*halfWindowSize + 1) * sum_I * sum_I) * (sum_Iprime_Iprime - 1/(2*halfWindowSize + 1) * sum_Iprime * sum_Iprime );
 
 	if(cost == 0)
-		return -1;
+		return 2; // very small color consistency
 	else
-		return (sum_I_Iprime - 1/(2*halfWindowSize + 1) * sum_I * sum_Iprime )/cost;
+		return 1 - (sum_I_Iprime - 1/(2*halfWindowSize + 1) * sum_I * sum_Iprime )/cost;
 }
 
 inline __device__ int findMinCost(float *cost)
@@ -282,10 +298,9 @@ inline __device__ int findMinCost(float *cost)
 }
 
 __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
-	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize)
+	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated)
 {
 	int col = blockDim.x * blockIdx.x + threadIdx.x;
-	
 	int threadId = threadIdx.x;
 
 	if(col < refImageWidth)
@@ -294,29 +309,34 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 		__shared__ float depth_current_array[N]; 
 		__shared__ float sumOfSPMap[N]; 
 		__shared__ float normalizedSPMap[N * TARGETIMGS]; // need plus 1 here ****
-		int s = (TARGETIMGS)>>7 + 1; // 7 is because each int type has 32 bits, and divided by 32 is equavalent to shift 32. s is number of bytes used to save selected images
+		int s = (TARGETIMGS)>>5 + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
 		float * depth_former = &depth_former_array[0];
 		float * depth_current = &depth_current_array[0];
-		__shared__ int selectedImages[ N * ( TARGETIMGS >>7) + N ];
+		__shared__ int selectedImages[ N * ( TARGETIMGS >>5) + N ]; // this is N * s
 
 		depth_former[threadId] = accessPitchMemory(depthMap, depthMapPitch, 0, col); 	// depth for 1st element
 		for( int row = 1; row < refImageHeight; ++row)
 		{
 			depth_current[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col); 
-			sumOfSPMap[threadId] = 0;
+			//sumOfSPMap[threadId] = 0;
 			
-			if(threadId < N * s) // fix N = 32
-				selectedImages[threadId] = 0;	// initialized to false
-			__syncthreads();	
+			//if(threadId < N * s) // fix N = 32, it equals number of threads per block
+			for(int i = 0; i<s; i++)
+				selectedImages[threadId + i * N] = 0;	// initialized to false
+			//__syncthreads();	// Here to syncthreads as we need to calculate 
 			//---------------------------------
+			//for(int i = 0; i<TARGETIMGS; i++)
+			//	sumOfSPMap[threadId] += accessPitchMemory(SPMap,  SPMapPitch, row * TARGETIMGS + i, col);
 			for(int i = 0; i<TARGETIMGS; i++)
-				sumOfSPMap[threadId] += accessPitchMemory(SPMap,  SPMapPitch, row * TARGETIMGS + i, col);
-			if(threadId < N)
-				for(int i = 0; i<TARGETIMGS; i++)
-					normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap,  SPMapPitch, row * TARGETIMGS + i, col) / (sumOfSPMap[threadId] + FLT_MIN );	// devide by 0
+				normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap,  SPMapPitch, row + TARGETIMGS * refImageHeight, col) /*/ (sumOfSPMap[threadId] + FLT_MIN )*/;	// devide by 0
+			
 			for(int i = 1; i<TARGETIMGS; i++)		//**** accumulate?
 				normalizedSPMap[threadId * i] += normalizedSPMap[threadId * (i-1)];
-			
+			// normalize
+			sumOfSPMap[threadId] = normalizedSPMap[N * (TARGETIMGS - 1) + threadId];
+			for(int i = 0; i<TARGETIMGS; i++)
+				normalizedSPMap[i * N + threadId] /= sumOfSPMap[threadId];
+
 			// draw samples and set the bit to 0
 			float numOfTestedSamples = 0;
 			float cost[3] = {0.0f};
@@ -329,11 +349,11 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 				{
 					if(randNum < normalizedSPMap[i + threadId * N])
 					{
-						int stateByte = selectedImages[(i>>7) * N + threadId];
-						int pos = i - sizeof(int) * (i>>7);
+						int stateByte = selectedImages[(i>>5) * N + threadId];
+						int pos = i - (sizeof(int) << 3) * (i>>5);  //(i - i /32 * 32)
 						// check the bit first and set imageId
 						bool state = CHECK_BIT(stateByte,pos);
-						if(!state)
+						if(!state) // if not set, then the images are not tested before. So 
 						{
 							imageId = i;
 							numOfTestedSamples++;
@@ -347,19 +367,40 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 				if(imageId != -1)
 				{
 					//computeNCC(int imageId, float centerRow, float centerCol, float depth, int halfWindowSize);
-					cost[0] +=  computeNCC(imageId, (float)row, (float)col, depth_former[threadId], halfWindowSize);
-					cost[1] +=  computeNCC(imageId, (float)row, (float)col, depth_current[threadId], halfWindowSize);
-					cost[2] +=  computeNCC(imageId, (float)row, (float)col, randDepth, halfWindowSize);
+					cost[0] +=  computeNCC(imageId, (float)row, (float)col, depth_former[threadId], halfWindowSize, isRotated);
+					cost[1] +=  computeNCC(imageId, (float)row, (float)col, depth_current[threadId], halfWindowSize, isRotated);
+					cost[2] +=  computeNCC(imageId, (float)row, (float)col, randDepth, halfWindowSize, isRotated);
 				}
 			}			
 			// find the minimum cost id, and then put cost into global memory 
+			cost[0] /= numOfTestedSamples; cost[1] /= numOfTestedSamples; cost[2] /= numOfTestedSamples;
+		
 			int idx = findMinCost(cost);
+			float bestDepth;
 			if(idx == 0)
+			{
 				writePitchMemory(depthMap, depthMapPitch, row, col, depth_former[threadId] );
+				bestDepth = depth_former[threadId];
+			}
 			else if(idx ==1)
+			{
 				writePitchMemory(depthMap, depthMapPitch, row, col, depth_current[threadId] );
+				bestDepth = depth_current[threadId];
+			}
 			else
+			{
 				writePitchMemory(depthMap, depthMapPitch, row, col, randDepth );
+				bestDepth = randDepth;
+			}
+			// Here I need to calculate SPMap based on the best depth, and put it into SPMap
+
+			float variance_inv = 1.0/(0.2 * 0.2);
+			for(int imageId = 0; imageId < TARGETIMGS; imageId++)
+			{
+				cost[0] = computeNCC(imageId, (float)row, (float)col, bestDepth, halfWindowSize, isRotated);
+				cost[0] = exp(-0.5 * cost[0] * cost[0] * variance_inv);
+				writePitchMemory(SPMap, SPMapPitch, (float)row + imageId * refImageHeight, (float)col, cost[0]);
+			}
 
 			// swap depth former and depth current
 			if(threadId == 0)

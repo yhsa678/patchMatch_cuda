@@ -52,8 +52,10 @@ public:
 
 private:
 	void copyData(const std::vector<Image> &allImage, int referenceId);
+	void transpose(Array2D_wrapper<float> *input, Array2D_wrapper<float> *output);
 	void transposeForward();
-	void transposeBack();
+	void transposeBackward();
+
 };
 
 
