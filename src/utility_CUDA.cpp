@@ -32,3 +32,14 @@ void __cudaCheckError( const char *file, const int line )
 	return;
 }
 
+
+void showGreyImage(unsigned char *data, int width, int height)
+{
+	imdebug("lum b=8 w=%d h=%d %p", width, height, data);
+}
+
+void showRGBImage(unsigned char *data, int width, int height)
+{
+	imdebug("rgb w=%d h=%d %p", width, height, data);
+}
+

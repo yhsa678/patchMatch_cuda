@@ -1,11 +1,30 @@
 #include "patchMatch.h"
 #include "cudaTranspose.h"
+#include "utility_CUDA.h"
 
 #define MAX_NUM_IMAGES 128
+
+__global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
+	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated);
 
 texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> allImgsTexture;
 texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> refImgTexture;
 __constant__ float transformHH[MAX_NUM_IMAGES * 9 * 2];
+
+#define N 32
+#define TARGETIMGS 20
+#define NUMOFSAMPLES 4
+
+void PatchMatch::computeCUDAConfig(int width, int height, int blockDim_x, int blockDim_y)
+{
+	_blockSize.x = blockDim_x;
+	_blockSize.y = blockDim_y;
+	_blockSize.z = 1;
+
+	_gridSize.x = (width - 1)/ static_cast<int>(blockDim_x) + 1 ;
+	_gridSize.y = (height - 1)/ static_cast<int>(blockDim_y) + 1 ;
+	_gridSize.z = 1;
+}
 
 void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 {
@@ -44,7 +63,7 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 			{
 				if(j < allImage[i]._imageData.rows)
 				{
-					memcpy( (void *)dest, (void *)source, allImage[i]._imageData.rows * allImage[i]._imageData.cols * numOfChannels * sizeof(unsigned char));	
+					memcpy( (void *)dest, (void *)source,  allImage[i]._imageData.cols * numOfChannels * sizeof(unsigned char));	
 
 					dest += (_maxWidth * numOfChannels);
 					source += allImage[i]._imageData.step;
@@ -53,6 +72,8 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 			++dataBlockId;
 		}
 	}
+	//showGreyImage(_imageDataBlock, _maxWidth, _maxHeight);
+	//showGreyImage(_imageDataBlock + _maxWidth * _maxHeight, _maxWidth, _maxHeight);
 	
 	// for the reference image
 	_refWidth = allImage[referenceId]._imageData.cols;
@@ -69,12 +90,13 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 		unsigned char *source = allImage[referenceId]._imageData.data;
 		for(int i = 0; i < _refHeight; i++)
 		{
-			memcpy((void*)dest, (void*)source,  _refWidth * _refHeight * numOfChannels * sizeof(unsigned char) );	
+			memcpy((void*)dest, (void*)source,  _refWidth * numOfChannels * sizeof(unsigned char) );	
 			source += allImage[i]._imageData.step;
 			dest += (_refWidth * numOfChannels);
 		}
 	}
 
+	//showGreyImage(_refImageDataBlock, _refWidth, _refHeight);
 
 	_transformHH = new float[18 * _numOfTargetImages];
 	int offset = 0;
@@ -93,12 +115,12 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 
 PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId): 
 	_imageDataBlock(NULL), _allImages_cudaArrayWrapper(NULL), _nearRange(nearRange), _farRange(farRange), _halfWindowSize(halfWindowSize), _blockDim_x(blockDim_x), _blockDim_y(blockDim_y), _refImageId(refImageId),
-		_depthMap(NULL), _SPMap(NULL), _psngState(NULL), _depthMapT(NULL), _SPMapT(NULL)
+		_depthMap(NULL), _SPMap(NULL), _psngState(NULL), _depthMapT(NULL), _SPMapT(NULL)//, _psngStateT(NULL)//, _randDepth(NULL), _randDepthT(NULL)
 {
 	_numOfTargetImages = allImage.size() - 1;
 	if(_numOfTargetImages == 0)
 	{
-		std::cout<< "Error: there is no images" << std::endl;
+		std::cout<< "Error: at least 2 images are needed for stereo" << std::endl;
 		exit(EXIT_FAILURE);
 	}
 	// using reference image id to update H1 and H2 for each image
@@ -132,9 +154,14 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 	_psngState = new Array2D_psng(_refWidth, _refHeight, _blockDim_x, _blockDim_y);
 	_depthMap->randNumGen(_nearRange, _farRange, _psngState->_array2D, _psngState->_pitchData);
 	_SPMap->randNumGen(0.0f, 1.0f, _psngState->_array2D, _psngState->_pitchData); 
+	//_randDepth = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y);
+	//_randDepthT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y);
 
 	_depthMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y);
 	_SPMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y, _numOfTargetImages);
+	//_psngStateT = new Array2D_psng(_refHeight, _refWidth, _blockDim_x, _blockDim_y);
+
+	// compute grid size and block size for cuda kernel
 }
 
 PatchMatch::~PatchMatch()
@@ -158,13 +185,17 @@ PatchMatch::~PatchMatch()
 		delete _SPMapT;
 	if(_depthMapT != NULL)
 		delete _depthMapT;
+	//if(_randDepth != NULL)
+	//	delete _randDepth;
+	//if(_randDepthT != NULL)
+	//	delete _randDepth;
+
 }
 
 void PatchMatch::transpose(Array2D_wrapper<float> *input, Array2D_wrapper<float> *output)
 {
 	//transpose2dData(float * input, float *output, int width, int height, int pitchInput, int pitchOutput);
 	//tp.transpose2dData(input_device + i * inputPitch * height/sizeof(float), output_device + i * outputPitch * width/sizeof(float), width, height,inputPitch, outputPitch );
-
 	//cudaTranspose::transpose2dData( _depthMap->_array2D, _depthMapT->_array2D, _depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_pitchData, _depthMapT->_pitchData);
 	
 	for(unsigned int d = 0; d < _depthMap->getDepth(); d++)
@@ -175,46 +206,65 @@ void PatchMatch::transpose(Array2D_wrapper<float> *input, Array2D_wrapper<float>
 	}
 }
 
+//void PatchMatch::transpose(Array2D_psng *input, Array2D_psng *output)
+//{
+//	//cudaTranspose::transpose2dData( input->_array2D, output->_array2D, input->getWidth(), input->getHeight(), output->_pitchData, output->_pitchData);
+//}
+
 void PatchMatch::transposeForward()
 {
 	transpose(_depthMap, _depthMapT);
 	transpose(_SPMap, _SPMapT);
+	//transpose(_randDepth, _randDepthT);
 }
 
 void PatchMatch::transposeBackward()
 {
 	transpose(_depthMapT, _depthMap);
 	transpose(_SPMapT, _SPMap);
+	//transpose(_randDepthT, randDepth);
 }
 
 void PatchMatch::run()
 {
-
+	int numOfSamples = 3;
+	bool isRotated = false;
 	for(int i = 0; i<3; i++)
 	{
 	// left to right sweep
 //-----------------------------------------------------------
+
 		transposeForward();
+		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), 32, 1);
+		isRotated = true;
+		topToDown<<<_gridSize, _blockSize>>>(_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
+			_SPMap->_array2D, _SPMap->_pitchData,
+			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
 
 //-----------------------------------------------------------
 	// top to bottom sweep 
 		transposeBackward();
+		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), 32, 1);
+		isRotated = false;
 
 	// right to left sweep
 		transposeForward();
+		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), 32, 1);
+		isRotated = true;
 
 	// bottom to top sweep
 
 		transposeBackward();
+		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), 32, 1);
+		isRotated = false;
+
 	}
 
 	// in the end I got the depthmap
 
 }
 
-#define N 32
-#define TARGETIMGS 20
-#define NUMOFSAMPLES 4
+
 
 inline __device__ float accessPitchMemory(float *data, int pitch, int row, int col)
 {
@@ -240,13 +290,11 @@ inline __device__ float drawRandNum(curandState *state, int statePitch, int col,
 
 inline __device__ void doTransform(float *col_prime, float *row_prime, float col, float row, int imageId, float depth)
 {
-	float *base = &transformHH[0] +  18 * imageId ;
+	float *base = &transformHH[0] +  18 * imageId;
 	float z = (base[6] - base[15]/depth) * col + (base[7] - base[16]/depth) * row + (base[8] - base[17]/depth);
 	*col_prime = ((base[0] - base[9]/depth) * col + (base[1] - base[10]/depth) * row + (base[2] - base[11]/depth))/z;
 	*row_prime = ((base[3] - base[12]/depth) * col + (base[4] - base[13]/depth) * row + (base[5] - base[14]/depth))/z;
-
 }
-
 
 inline __device__ float computeNCC(int imageId, float centerRow, float centerCol, float depth, int halfWindowSize, bool isRotated)
 	// here the return resutls are 1-NCC, so the range is [0, 2], the smaller value, the better color consistency
@@ -264,15 +312,13 @@ inline __device__ float computeNCC(int imageId, float centerRow, float centerCol
 	{
 		for(float col = centerCol - halfWindowSize; col <= centerCol + halfWindowSize; col++) // x
 		{
-			float I = tex2DLayered( refImgTexture , col + 0.5f , row + 0.5f,  imageId);
-
 			// do transform to get the new position
 			if(!isRotated)
 				doTransform(&col_prime, &row_prime, col + 0.5f, row + 0.5f, imageId, depth);
 			else
 				doTransform(&col_prime, &row_prime, row + 0.5f, col + 0.5f, imageId, depth);
-
 			float Iprime = tex2DLayered(allImgsTexture, col_prime, row_prime, imageId); // textures are not rotated
+			float I = tex2DLayered( refImgTexture , col + 0.5f , row + 0.5f,  imageId);
 
 			sum_I_I += (I * I);
 			sum_Iprime_Iprime += (Iprime * Iprime);
@@ -281,7 +327,7 @@ inline __device__ float computeNCC(int imageId, float centerRow, float centerCol
 			sum_Iprime += Iprime;
 		}
 	}	
-	float cost = (sum_I_I - 1/(2*halfWindowSize + 1) * sum_I * sum_I) * (sum_Iprime_Iprime - 1/(2*halfWindowSize + 1) * sum_Iprime * sum_Iprime );
+	float cost = (sum_I_I - 1.0/(2*halfWindowSize + 1) * sum_I * sum_I) * (sum_Iprime_Iprime - 1.0/(2*halfWindowSize + 1) * sum_Iprime * sum_Iprime );
 
 	if(cost == 0)
 		return 2; // very small color consistency
@@ -305,11 +351,11 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 
 	if(col < refImageWidth)
 	{
-		__shared__ float depth_former_array[N]; 
+		__shared__ float depth_former_array[N]; // N is number of threads per block 
 		__shared__ float depth_current_array[N]; 
 		__shared__ float sumOfSPMap[N]; 
-		__shared__ float normalizedSPMap[N * TARGETIMGS]; // need plus 1 here ****
-		int s = (TARGETIMGS)>>5 + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
+		__shared__ float normalizedSPMap[N * TARGETIMGS]; // need plus 1 here ****. It seems not necessary
+		int s = (TARGETIMGS) >> 5 + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
 		float * depth_former = &depth_former_array[0];
 		float * depth_current = &depth_current_array[0];
 		__shared__ int selectedImages[ N * ( TARGETIMGS >>5) + N ]; // this is N * s
@@ -318,15 +364,12 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 		for( int row = 1; row < refImageHeight; ++row)
 		{
 			depth_current[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col); 
-			//sumOfSPMap[threadId] = 0;
 			
 			//if(threadId < N * s) // fix N = 32, it equals number of threads per block
 			for(int i = 0; i<s; i++)
 				selectedImages[threadId + i * N] = 0;	// initialized to false
 			//__syncthreads();	// Here to syncthreads as we need to calculate 
 			//---------------------------------
-			//for(int i = 0; i<TARGETIMGS; i++)
-			//	sumOfSPMap[threadId] += accessPitchMemory(SPMap,  SPMapPitch, row * TARGETIMGS + i, col);
 			for(int i = 0; i<TARGETIMGS; i++)
 				normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap,  SPMapPitch, row + TARGETIMGS * refImageHeight, col) /*/ (sumOfSPMap[threadId] + FLT_MIN )*/;	// devide by 0
 			
@@ -340,10 +383,22 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 			// draw samples and set the bit to 0
 			float numOfTestedSamples = 0;
 			float cost[3] = {0.0f};
-			float randDepth = drawRandNum(randState, randStatePitch, col, row, depthRangeNear, depthRangeFar);
+
+			// here it is better to generate a random depthmap
+			float randDepth;
+			if(!isRotated)	
+				randDepth = drawRandNum(randState, randStatePitch, col, row, depthRangeNear, depthRangeFar);
+			else
+				randDepth = drawRandNum(randState, randStatePitch, row, col, depthRangeNear, depthRangeFar);
+
 			for(int j = 0; j < numOfSamples; j++)
 			{
-				float randNum = drawRandNum(randState, randStatePitch, col, row, 0.0f, 1.0f);				
+				float randNum; 
+				if(!isRotated)
+					randNum = drawRandNum(randState, randStatePitch, col, row, 0.0f, 1.0f);				
+				else
+					randNum = drawRandNum(randState, randStatePitch, row, col, 0.0f, 1.0f);
+
 				int imageId = -1;				
 				for(int i = 0; i < TARGETIMGS; i++)
 				{

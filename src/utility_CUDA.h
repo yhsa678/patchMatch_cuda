@@ -4,14 +4,14 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <string>
+#include <imdebug.h>
 
+//#include "imdebug.h"
 #define CUDA_SAFE_CALL(err) _CUDA_SAFE_CALL( err,__FILE__, __LINE__)
 #define CudaCheckError()    __cudaCheckError( __FILE__, __LINE__ )
 
 void _CUDA_SAFE_CALL( cudaError_t err, std::string file = __FILE__, int line = __LINE__);
 void __cudaCheckError( const char *file, const int line );
-
-
 
 class CudaTimer{
 private:
@@ -41,6 +41,9 @@ public:
 		printf("it takes: %f\n" , elapsedTime);
 	}
 };
+
+void showGreyImage(unsigned char *data, int width, int height);
+void showRGBImage(unsigned char *data, int width, int height);
 
 
 #endif
