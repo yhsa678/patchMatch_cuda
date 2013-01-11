@@ -1,4 +1,5 @@
 #include "utility_CUDA.h"
+#include <vector>
 
 void _CUDA_SAFE_CALL( cudaError_t err, std::string file, int line)
 {
@@ -43,3 +44,9 @@ void showRGBImage(unsigned char *data, int width, int height)
 	imdebug("rgb w=%d h=%d %p", width, height, data);
 }
 
+void viewData1DDevicePointer(float * data, int size)
+{
+	thrust::device_ptr<float> dev_ptr(data);
+	thrust::copy(dev_ptr, dev_ptr + size, std::ostream_iterator<float>(std::cout, " "));
+	std::cout<< std::endl;
+}

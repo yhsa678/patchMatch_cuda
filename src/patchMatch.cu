@@ -12,8 +12,7 @@ texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> refImgText
 __constant__ float transformHH[MAX_NUM_IMAGES * 9 * 2];
 
 #define N 32
-#define TARGETIMGS 20
-#define NUMOFSAMPLES 4
+#define TARGETIMGS 2u
 
 void PatchMatch::computeCUDAConfig(int width, int height, int blockDim_x, int blockDim_y)
 {
@@ -22,7 +21,8 @@ void PatchMatch::computeCUDAConfig(int width, int height, int blockDim_x, int bl
 	_blockSize.z = 1;
 
 	_gridSize.x = (width - 1)/ static_cast<int>(blockDim_x) + 1 ;
-	_gridSize.y = (height - 1)/ static_cast<int>(blockDim_y) + 1 ;
+	//_gridSize.y = (height - 1)/ static_cast<int>(blockDim_y) + 1 ;
+	_gridSize.y = 1;
 	_gridSize.z = 1;
 }
 
@@ -104,10 +104,10 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 	{
 		if(i != referenceId)
 		{
-			memcpy((void*)(_transformHH+offset), (void*)allImage[i]._H1.data, 18 * sizeof(float));
-			offset += 18;
-			memcpy((void*)(_transformHH+offset), (void*)allImage[i]._H2.data, 18 * sizeof(float));
-			offset += 18;
+			memcpy((void*)(_transformHH+offset), (void*)allImage[i]._H1.data, 9 * sizeof(float));
+			offset += 9;
+			memcpy((void*)(_transformHH+offset), (void*)allImage[i]._H2.data, 9 * sizeof(float));
+			offset += 9;
 		}
 	}
 
@@ -133,6 +133,10 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 	// ---------- initialize array
 	_allImages_cudaArrayWrapper = new CudaArray_wrapper(_maxWidth, _maxHeight, _numOfTargetImages);
 	_refImages_cudaArrayWrapper = new CudaArray_wrapper(_refWidth, _refHeight, 1);
+
+	
+
+
 	// ---------- upload image data to GPU
 	_allImages_cudaArrayWrapper->array3DCopy<unsigned char>(_imageDataBlock, cudaMemcpyHostToDevice);
 	_refImages_cudaArrayWrapper->array3DCopy<unsigned char>(_refImageDataBlock, cudaMemcpyHostToDevice);
@@ -152,16 +156,13 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 	_depthMap = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y);
 	_SPMap = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y, _numOfTargetImages);
 	_psngState = new Array2D_psng(_refWidth, _refHeight, _blockDim_x, _blockDim_y);
+
 	_depthMap->randNumGen(_nearRange, _farRange, _psngState->_array2D, _psngState->_pitchData);
 	_SPMap->randNumGen(0.0f, 1.0f, _psngState->_array2D, _psngState->_pitchData); 
-	//_randDepth = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y);
-	//_randDepthT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y);
+	viewData1DDevicePointer( _SPMap->_array2D, 100);
 
 	_depthMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y);
 	_SPMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y, _numOfTargetImages);
-	//_psngStateT = new Array2D_psng(_refHeight, _refWidth, _blockDim_x, _blockDim_y);
-
-	// compute grid size and block size for cuda kernel
 }
 
 PatchMatch::~PatchMatch()
@@ -185,10 +186,7 @@ PatchMatch::~PatchMatch()
 		delete _SPMapT;
 	if(_depthMapT != NULL)
 		delete _depthMapT;
-	//if(_randDepth != NULL)
-	//	delete _randDepth;
-	//if(_randDepthT != NULL)
-	//	delete _randDepth;
+	
 
 }
 
@@ -203,7 +201,9 @@ void PatchMatch::transpose(Array2D_wrapper<float> *input, Array2D_wrapper<float>
 		cudaTranspose::transpose2dData( input->_array2D + d * input->_pitchData * input->getHeight(),
 										output->_array2D + d * output->_pitchData * output->getHeight(),
 										input->getWidth(), input->getHeight(), output->_pitchData, output->_pitchData);
+		CudaCheckError();
 	}
+
 }
 
 //void PatchMatch::transpose(Array2D_psng *input, Array2D_psng *output)
@@ -227,8 +227,8 @@ void PatchMatch::transposeBackward()
 
 void PatchMatch::run()
 {
-	int numOfSamples = 3;
-	bool isRotated = false;
+	int numOfSamples = 2;
+	bool isRotated;
 	for(int i = 0; i<3; i++)
 	{
 	// left to right sweep
@@ -237,7 +237,7 @@ void PatchMatch::run()
 		transposeForward();
 		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), 32, 1);
 		isRotated = true;
-		topToDown<<<_gridSize, _blockSize>>>(_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
+		topToDown<<<_gridSize, _blockSize>>>(_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
 
@@ -246,6 +246,7 @@ void PatchMatch::run()
 		transposeBackward();
 		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), 32, 1);
 		isRotated = false;
+
 
 	// right to left sweep
 		transposeForward();
@@ -355,7 +356,7 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 		__shared__ float depth_current_array[N]; 
 		__shared__ float sumOfSPMap[N]; 
 		__shared__ float normalizedSPMap[N * TARGETIMGS]; // need plus 1 here ****. It seems not necessary
-		int s = (TARGETIMGS) >> 5 + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
+		int s = (TARGETIMGS >> 5) + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
 		float * depth_former = &depth_former_array[0];
 		float * depth_current = &depth_current_array[0];
 		__shared__ int selectedImages[ N * ( TARGETIMGS >>5) + N ]; // this is N * s
@@ -371,10 +372,10 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 			//__syncthreads();	// Here to syncthreads as we need to calculate 
 			//---------------------------------
 			for(int i = 0; i<TARGETIMGS; i++)
-				normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap,  SPMapPitch, row + TARGETIMGS * refImageHeight, col) /*/ (sumOfSPMap[threadId] + FLT_MIN )*/;	// devide by 0
+				normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) /*/ (sumOfSPMap[threadId] + FLT_MIN )*/;	// devide by 0
 			
 			for(int i = 1; i<TARGETIMGS; i++)		//**** accumulate?
-				normalizedSPMap[threadId * i] += normalizedSPMap[threadId * (i-1)];
+				normalizedSPMap[i * N + threadId] += normalizedSPMap[(i-1) * N + threadId ];
 			// normalize
 			sumOfSPMap[threadId] = normalizedSPMap[N * (TARGETIMGS - 1) + threadId];
 			for(int i = 0; i<TARGETIMGS; i++)

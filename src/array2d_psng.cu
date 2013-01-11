@@ -2,8 +2,8 @@
 
 __global__ void setup_kernel ( curandState * state,  int width, int height, int pitch )
 {
-	int x = blockIdx.x * gridDim.x + threadIdx.x;
-	int y = blockIdx.y * gridDim.y + threadIdx.y;
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
 
 	int UniqueBlockIndex = blockIdx.y * gridDim.x + blockIdx.x;
 	int id = UniqueBlockIndex * blockDim.y * blockDim.x + threadIdx.y * blockDim.x + threadIdx.x; // unique id

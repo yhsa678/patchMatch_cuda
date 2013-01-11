@@ -71,6 +71,7 @@ void Array2D_wrapper<T> :: randNumGen(float rangeStart, float rangeEnd, curandSt
 		generate_kernel_float <<<_gridSize, _blockSize >>>(devStates, pitchState, _array2D, _pitchData, _width, _height, rangeStart, rangeEnd );	
 	else
 		generate_kernel_float_withDepth<<<_gridSize, _blockSize >>>(devStates, pitchState, _array2D, _pitchData, _width, _height, _depth, rangeStart, rangeEnd );	
+	CudaCheckError();
 }
 
 template<class T>

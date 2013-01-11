@@ -5,6 +5,10 @@
 #include <stdio.h>
 #include <string>
 #include <imdebug.h>
+#include <thrust/device_vector.h>
+#include <thrust/device_ptr.h>
+#include <iostream>
+#include <iterator>
 
 //#include "imdebug.h"
 #define CUDA_SAFE_CALL(err) _CUDA_SAFE_CALL( err,__FILE__, __LINE__)
@@ -44,6 +48,10 @@ public:
 
 void showGreyImage(unsigned char *data, int width, int height);
 void showRGBImage(unsigned char *data, int width, int height);
+
+
+void viewData1DDevicePointer(float * data, int size);
+
 
 
 #endif

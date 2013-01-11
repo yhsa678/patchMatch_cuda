@@ -7,19 +7,19 @@ void Image::init_relative(const Image &refImg)
 	_relative_T = _R * (_C - refImg._C);
 
 	_H1 = _K * _relative_R * refImg._inverseK;
-	cv::Mat normalVector = (cv::Mat_<double>(1,3) << 0, 0, 1);
+	cv::Mat normalVector = (cv::Mat_<float>(1,3) << 0, 0, 1);
 	_H2 = _K * _relative_T * normalVector * refImg._inverseK;
 }
 
 
 void Image::updateCamParam(float *K, float *R, float *T, std::string imageFileName)
 {
-	_K = cv::Mat(3,3,CV_64F, K).clone();
-	_R = cv::Mat(3,3,CV_64F, R).clone();
-	_T = cv::Mat(3,1,CV_64F, T).clone();
+	_K = cv::Mat(3,3,CV_32F, K).clone();
+	_R = cv::Mat(3,3,CV_32F, R).clone();
+	_T = cv::Mat(3,1,CV_32F, T).clone();
 	_C = -_R.t() * _T;
 
-	_proj.create(3,4,CV_64F);
+	_proj.create(3,4,CV_32F);
 	for(int i = 0; i< 3; i++)
 		// + 0 is necessary. See: http://opencv.willowgarage.com/documentation/cpp/core_basic_structures.html#Mat::row	
 		_proj.col(i) = _R.col(i) + 0;	
