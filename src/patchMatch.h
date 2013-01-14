@@ -49,9 +49,9 @@ public:
 
 
 	float *_transformHH;
-
+	int _numOfSamples;
 //--------------------------------------------------
-	PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId);
+	PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId, int numOfSamples);
 	void run();
 
 	~PatchMatch();

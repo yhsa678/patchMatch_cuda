@@ -4,6 +4,10 @@
 #include <curand_kernel.h>
 #include "utility_CUDA.h"
 
+#include <string>
+#include <fstream>
+#include <iterator>
+
 __global__ void generate_kernel_float( curandState *state, int statePitch,  float * result, int resultPitch, int width, int height, float rangeStart, float rangeEnd );
 __global__ void generate_kernel_float_withDepth( curandState *state, int statePitch,  float * result, int resultPitch, int width, int height, int depth, float rangeStart, float rangeEnd );
 
@@ -31,6 +35,22 @@ public:
 	size_t getHeight();
 	size_t getDepth();
 
+	void copyData(T* destPtr, size_t destPitch, enum cudaMemcpyKind kind)
+	{
+		// cudaMemcpyHostToDevice, cudaMemcpyDeviceToHost
+		CUDA_SAFE_CALL(cudaMemcpy2D(destPtr, destPitch, _array2D, _pitchData, 	_width * sizeof(T), _height*_depth,	kind));
+	}
+
+	void saveToFile(std::string fileName)
+	{
+		std::fstream fout(fileName, 'w');
+		T *destPtr = new T[_width * _height * _depth];
+		copyData(destPtr, _width * sizeof(T), cudaMemcpyDeviceToHost);
+		std::copy(destPtr, destPtr + _width * _height * _depth, std::ostream_iterator<T>(fout, " "));
+	
+		delete []destPtr;
+		fout.close();
+	}
 
 protected:
 	void computeCUDAConfig();

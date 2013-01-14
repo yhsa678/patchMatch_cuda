@@ -7,11 +7,14 @@
 __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
 	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated);
 
+__global__ void downToTop(int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
+	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated);
+
 texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> allImgsTexture;
 texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> refImgTexture;
 __constant__ float transformHH[MAX_NUM_IMAGES * 9 * 2];
 
-#define N 32
+#define N 64
 #define TARGETIMGS 2u
 
 void PatchMatch::computeCUDAConfig(int width, int height, int blockDim_x, int blockDim_y)
@@ -72,8 +75,6 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 			++dataBlockId;
 		}
 	}
-	//showGreyImage(_imageDataBlock, _maxWidth, _maxHeight);
-	//showGreyImage(_imageDataBlock + _maxWidth * _maxHeight, _maxWidth, _maxHeight);
 	
 	// for the reference image
 	_refWidth = allImage[referenceId]._imageData.cols;
@@ -96,8 +97,6 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 		}
 	}
 
-	//showGreyImage(_refImageDataBlock, _refWidth, _refHeight);
-
 	_transformHH = new float[18 * _numOfTargetImages];
 	int offset = 0;
 	for(unsigned int i = 0; i< allImage.size(); i++)
@@ -113,9 +112,9 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 
 } 
 
-PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId): 
+PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId, int numOfSamples): 
 	_imageDataBlock(NULL), _allImages_cudaArrayWrapper(NULL), _nearRange(nearRange), _farRange(farRange), _halfWindowSize(halfWindowSize), _blockDim_x(blockDim_x), _blockDim_y(blockDim_y), _refImageId(refImageId),
-		_depthMap(NULL), _SPMap(NULL), _psngState(NULL), _depthMapT(NULL), _SPMapT(NULL)//, _psngStateT(NULL)//, _randDepth(NULL), _randDepthT(NULL)
+		_depthMap(NULL), _SPMap(NULL), _psngState(NULL), _depthMapT(NULL), _SPMapT(NULL), _numOfSamples(numOfSamples)
 {
 	_numOfTargetImages = allImage.size() - 1;
 	if(_numOfTargetImages == 0)
@@ -134,18 +133,17 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 	_allImages_cudaArrayWrapper = new CudaArray_wrapper(_maxWidth, _maxHeight, _numOfTargetImages);
 	_refImages_cudaArrayWrapper = new CudaArray_wrapper(_refWidth, _refHeight, 1);
 
-	
-
-
 	// ---------- upload image data to GPU
 	_allImages_cudaArrayWrapper->array3DCopy<unsigned char>(_imageDataBlock, cudaMemcpyHostToDevice);
 	_refImages_cudaArrayWrapper->array3DCopy<unsigned char>(_refImageDataBlock, cudaMemcpyHostToDevice);
 	// attach to texture so that the kernel can access the data
-	allImgsTexture.addressMode[0] = cudaAddressModeWrap; allImgsTexture.addressMode[1] = cudaAddressModeClamp; 
+	allImgsTexture.addressMode[0] = cudaAddressModeBorder; allImgsTexture.addressMode[1] = cudaAddressModeBorder; 
+	allImgsTexture.addressMode[2] = cudaAddressModeBorder;
 	allImgsTexture.filterMode = cudaFilterModeLinear;	allImgsTexture.normalized = false;
 	CUDA_SAFE_CALL(cudaBindTextureToArray(allImgsTexture, _allImages_cudaArrayWrapper->_array3D));	// bind to texture	
 	
-	refImgTexture.addressMode[0] = cudaAddressModeWrap; refImgTexture.addressMode[1] = cudaAddressModeClamp; 
+	refImgTexture.addressMode[0] = cudaAddressModeBorder; refImgTexture.addressMode[1] = cudaAddressModeBorder; 
+	refImgTexture.addressMode[2] = cudaAddressModeBorder;
 	refImgTexture.filterMode = cudaFilterModeLinear;	refImgTexture.normalized = false;
 	CUDA_SAFE_CALL(cudaBindTextureToArray(refImgTexture, _refImages_cudaArrayWrapper->_array3D));	// bind to
 	
@@ -159,7 +157,7 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 
 	_depthMap->randNumGen(_nearRange, _farRange, _psngState->_array2D, _psngState->_pitchData);
 	_SPMap->randNumGen(0.0f, 1.0f, _psngState->_array2D, _psngState->_pitchData); 
-	viewData1DDevicePointer( _SPMap->_array2D, 100);
+	//viewData1DDevicePointer( _SPMap->_array2D, 100);
 
 	_depthMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y);
 	_SPMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y, _numOfTargetImages);
@@ -196,11 +194,11 @@ void PatchMatch::transpose(Array2D_wrapper<float> *input, Array2D_wrapper<float>
 	//tp.transpose2dData(input_device + i * inputPitch * height/sizeof(float), output_device + i * outputPitch * width/sizeof(float), width, height,inputPitch, outputPitch );
 	//cudaTranspose::transpose2dData( _depthMap->_array2D, _depthMapT->_array2D, _depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_pitchData, _depthMapT->_pitchData);
 	
-	for(unsigned int d = 0; d < _depthMap->getDepth(); d++)
+	for(unsigned int d = 0; d < input->getDepth(); d++)
 	{
-		cudaTranspose::transpose2dData( input->_array2D + d * input->_pitchData * input->getHeight(),
-										output->_array2D + d * output->_pitchData * output->getHeight(),
-										input->getWidth(), input->getHeight(), output->_pitchData, output->_pitchData);
+		cudaTranspose::transpose2dData( input->_array2D + d * input->_pitchData/sizeof(float) * input->getHeight(),			// **** here sizeof(float) may be able to be changed to corresponds to the datatype of input->array2d
+										output->_array2D + d * output->_pitchData/sizeof(float) * output->getHeight(),
+										input->getWidth(), input->getHeight(), input->_pitchData, output->_pitchData);
 		CudaCheckError();
 	}
 
@@ -227,40 +225,70 @@ void PatchMatch::transposeBackward()
 
 void PatchMatch::run()
 {
-	int numOfSamples = 2;
+	int numOfSamples;
 	bool isRotated;
-	for(int i = 0; i<3; i++)
+	std::cout<< "started" << std::endl;
+	for(int i = 0; i<1; i++)
 	{
 	// left to right sweep
 //-----------------------------------------------------------
+		if(i == 0)
+			numOfSamples = 1; // ****
+		else
+			numOfSamples = _numOfSamples;
 
-		transposeForward();
-		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), 32, 1);
+		CudaTimer t;
+		
+	/*	transposeForward();
+		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
 		isRotated = true;
+		t.startRecord();
 		topToDown<<<_gridSize, _blockSize>>>(_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
-			_SPMap->_array2D, _SPMap->_pitchData,
+			_SPMapT->_array2D, _SPMapT->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
+		t.stopRecord();*/
 
+		
 //-----------------------------------------------------------
 	// top to bottom sweep 
-		transposeBackward();
-		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), 32, 1);
+		/*transposeBackward();
+		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), N, 1);
 		isRotated = false;
+		t.startRecord();
+		topToDown<<<_gridSize, _blockSize>>>(_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
+			_SPMap->_array2D, _SPMap->_pitchData,
+			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
+		t.stopRecord();
 
+		_depthMap->saveToFile("depthMap.txt");*/
 
-	// right to left sweep
-		transposeForward();
-		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), 32, 1);
+	//	
+
+	//// right to left sweep
+	/*	transposeForward();
+		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
 		isRotated = true;
+		t.startRecord();
+		downToTop<<<_gridSize, _blockSize>>>(_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
+			_SPMapT->_array2D, _SPMapT->_pitchData,
+			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
+		t.stopRecord();
+		_depthMapT->saveToFile("depthMap_transposed.txt");*/
 
-	// bottom to top sweep
+	//// bottom to top sweep
 
 		transposeBackward();
 		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), 32, 1);
 		isRotated = false;
+		t.startRecord();
+		downToTop<<<_gridSize, _blockSize>>>(_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
+			_SPMap->_array2D, _SPMap->_pitchData,
+			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
+		t.stopRecord();
+		_depthMap->saveToFile("depthMap.txt");
 
 	}
-
+	std::cout<< "ended " << std::endl;
 	// in the end I got the depthmap
 
 }
@@ -318,8 +346,13 @@ inline __device__ float computeNCC(int imageId, float centerRow, float centerCol
 				doTransform(&col_prime, &row_prime, col + 0.5f, row + 0.5f, imageId, depth);
 			else
 				doTransform(&col_prime, &row_prime, row + 0.5f, col + 0.5f, imageId, depth);
-			float Iprime = tex2DLayered(allImgsTexture, col_prime, row_prime, imageId); // textures are not rotated
-			float I = tex2DLayered( refImgTexture , col + 0.5f , row + 0.5f,  imageId);
+			float Iprime = tex2DLayered(allImgsTexture, col_prime + 0.5, row_prime + 0.5, imageId); // textures are not rotated
+
+			float I;
+			if(!isRotated)
+				I = tex2DLayered( refImgTexture, col + 0.5f, row + 0.5f,  imageId);
+			else
+				I = tex2DLayered( refImgTexture, row + 0.5f, col + 0.5f, imageId);
 
 			sum_I_I += (I * I);
 			sum_Iprime_Iprime += (Iprime * Iprime);
@@ -328,19 +361,21 @@ inline __device__ float computeNCC(int imageId, float centerRow, float centerCol
 			sum_Iprime += Iprime;
 		}
 	}	
-	float cost = (sum_I_I - 1.0/(2*halfWindowSize + 1) * sum_I * sum_I) * (sum_Iprime_Iprime - 1.0/(2*halfWindowSize + 1) * sum_Iprime * sum_Iprime );
+	float inverseWindowSize = halfWindowSize * 2.0f + 1.0f;
+	inverseWindowSize = 1.0f / (inverseWindowSize * inverseWindowSize);
+	//float cost = (sum_I_I - 1.0f/(2*halfWindowSize + 1) * sum_I * sum_I) * (sum_Iprime_Iprime - 1.0/(2*halfWindowSize + 1) * sum_Iprime * sum_Iprime );
+	float cost = sqrt((sum_I_I - inverseWindowSize * sum_I * sum_I) * (sum_Iprime_Iprime - inverseWindowSize * sum_Iprime * sum_Iprime )); 
 
 	if(cost == 0)
 		return 2; // very small color consistency
 	else
-		return 1 - (sum_I_Iprime - 1/(2*halfWindowSize + 1) * sum_I * sum_Iprime )/cost;
+		return 1 - (sum_I_Iprime - inverseWindowSize * sum_I * sum_Iprime )/cost;
 }
 
 inline __device__ int findMinCost(float *cost)
 {
 	int idx = cost[0] < cost[1]? 0:1;
-	cost[1] = cost[idx];
-	idx = cost[1] < cost[2]? 1:2;
+	idx = cost[idx] < cost[2]? idx:2;
 	return idx;
 }
 
@@ -356,25 +391,36 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 		__shared__ float depth_current_array[N]; 
 		__shared__ float sumOfSPMap[N]; 
 		__shared__ float normalizedSPMap[N * TARGETIMGS]; // need plus 1 here ****. It seems not necessary
-		int s = (TARGETIMGS >> 5) + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
-		float * depth_former = &depth_former_array[0];
-		float * depth_current = &depth_current_array[0];
-		__shared__ int selectedImages[ N * ( TARGETIMGS >>5) + N ]; // this is N * s
+		unsigned int s = (TARGETIMGS >> 5) + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
+		__shared__ unsigned int selectedImages[ N * ( TARGETIMGS >>5) + N ]; // this is N * s
 
-		depth_former[threadId] = accessPitchMemory(depthMap, depthMapPitch, 0, col); 	// depth for 1st element
+		depth_former_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, 0, col); 	// depth for 1st element
 		for( int row = 1; row < refImageHeight; ++row)
 		{
-			depth_current[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col); 
+			depth_current_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col); 
 			
 			//if(threadId < N * s) // fix N = 32, it equals number of threads per block
 			for(int i = 0; i<s; i++)
 				selectedImages[threadId + i * N] = 0;	// initialized to false
 			//__syncthreads();	// Here to syncthreads as we need to calculate 
+
 			//---------------------------------
-			for(int i = 0; i<TARGETIMGS; i++)
-				normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) /*/ (sumOfSPMap[threadId] + FLT_MIN )*/;	// devide by 0
-			
-			for(int i = 1; i<TARGETIMGS; i++)		//**** accumulate?
+			if(numOfSamples == 1)
+			{
+				for(int i = 0; i<TARGETIMGS; i++)
+					normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap, SPMapPitch, row-1 + i * refImageHeight, col );	// in the first round I only choose 1 sample. And SPMap is chosen from 
+			}
+			else
+			{
+				//for(int i = 0; i<TARGETIMGS; i++)
+				//	normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) /*/ (sumOfSPMap[threadId] + FLT_MIN )*/;	// devide by 0
+				for(int i = 0; i<TARGETIMGS; i++)
+					normalizedSPMap[i * N + threadId ] = (accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) 
+						+ accessPitchMemory(SPMap, SPMapPitch, row-1 + i * refImageHeight, col) )/2.0f;		// average of the near two
+			}
+
+			//---------------------------------
+			for(int i = 1; i<TARGETIMGS; i++)		
 				normalizedSPMap[i * N + threadId] += normalizedSPMap[(i-1) * N + threadId ];
 			// normalize
 			sumOfSPMap[threadId] = normalizedSPMap[N * (TARGETIMGS - 1) + threadId];
@@ -403,28 +449,29 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 				int imageId = -1;				
 				for(int i = 0; i < TARGETIMGS; i++)
 				{
-					if(randNum < normalizedSPMap[i + threadId * N])
+					if(randNum <= normalizedSPMap[i * N + threadId ])
 					{
-						int stateByte = selectedImages[(i>>5) * N + threadId];
-						int pos = i - (sizeof(int) << 3) * (i>>5);  //(i - i /32 * 32)
+						unsigned int &stateByte = selectedImages[(i>>5) * N + threadId];
+						unsigned int pos = i - (sizeof(int) << 3) * (i>>5);  //(i - i /32 * numberOfBitsPerInt)
 						// check the bit first and set imageId
-						bool state = CHECK_BIT(stateByte,pos);
-						if(!state) // if not set, then the images are not tested before. So 
+						//bool state = CHECK_BIT(stateByte,pos);
+						//if(!state) // if not set, then the images are not tested before. So 
+						if(!CHECK_BIT(stateByte,pos))
 						{
 							imageId = i;
 							numOfTestedSamples++;
 						}
 						// then set the bit
-						SET_BIT(stateByte, pos);
+						SET_BIT(stateByte, pos);	// 
 						break;
 					}
 				}
-				// image id is i( id != -1). Test the id using NCC, with 3 different depth. 
+				// image id is i( id != -1). Test the id using NCC, with 3 different depth. 				
 				if(imageId != -1)
 				{
 					//computeNCC(int imageId, float centerRow, float centerCol, float depth, int halfWindowSize);
-					cost[0] +=  computeNCC(imageId, (float)row, (float)col, depth_former[threadId], halfWindowSize, isRotated);
-					cost[1] +=  computeNCC(imageId, (float)row, (float)col, depth_current[threadId], halfWindowSize, isRotated);
+					cost[0] +=  computeNCC(imageId, (float)row, (float)col, depth_former_array[threadId], halfWindowSize, isRotated);			// accumulate the cost
+					cost[1] +=  computeNCC(imageId, (float)row, (float)col, depth_current_array[threadId], halfWindowSize, isRotated);
 					cost[2] +=  computeNCC(imageId, (float)row, (float)col, randDepth, halfWindowSize, isRotated);
 				}
 			}			
@@ -435,13 +482,13 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 			float bestDepth;
 			if(idx == 0)
 			{
-				writePitchMemory(depthMap, depthMapPitch, row, col, depth_former[threadId] );
-				bestDepth = depth_former[threadId];
+				writePitchMemory(depthMap, depthMapPitch, row, col, depth_former_array[threadId] );
+				bestDepth = depth_former_array[threadId];
 			}
 			else if(idx ==1)
 			{
-				writePitchMemory(depthMap, depthMapPitch, row, col, depth_current[threadId] );
-				bestDepth = depth_current[threadId];
+				writePitchMemory(depthMap, depthMapPitch, row, col, depth_current_array[threadId] );
+				bestDepth = depth_current_array[threadId];
 			}
 			else
 			{
@@ -457,19 +504,149 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 				cost[0] = exp(-0.5 * cost[0] * cost[0] * variance_inv);
 				writePitchMemory(SPMap, SPMapPitch, (float)row + imageId * refImageHeight, (float)col, cost[0]);
 			}
+			// write depth
+			writePitchMemory(depthMap, depthMapPitch, (float)row, (float)col, bestDepth);
 
 			// swap depth former and depth current
-			if(threadId == 0)
-			{
-				float *tempAddr = depth_former;
-				depth_former = depth_current;
-				depth_current = tempAddr;
-			}
+			depth_former_array[threadId] = bestDepth;
 		}
 	}
 }
 
+__global__ void downToTop(int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
+	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated)
+{
+	int col = blockDim.x * blockIdx.x + threadIdx.x;
+	int threadId = threadIdx.x;
 
+	if(col < refImageWidth)
+	{
+		__shared__ float depth_former_array[N]; // N is number of threads per block 
+		__shared__ float depth_current_array[N]; 
+		__shared__ float sumOfSPMap[N]; 
+		__shared__ float normalizedSPMap[N * TARGETIMGS]; // need plus 1 here ****. It seems not necessary
+		unsigned int s = (TARGETIMGS >> 5) + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
+		__shared__ unsigned int selectedImages[ N * ( TARGETIMGS >>5) + N ]; // this is N * s
+
+		depth_former_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, refImageHeight - 2, col); 	// depth for 1st element
+		//for( int row = 1; row < refImageHeight; ++row)
+		for(int row = refImageHeight - 2; row >=0; --row)
+		{
+			depth_current_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col); 
+			
+			//if(threadId < N * s) // fix N = 32, it equals number of threads per block
+			for(int i = 0; i<s; i++)
+				selectedImages[threadId + i * N] = 0;	// initialized to false
+			//__syncthreads();	// Here to syncthreads as we need to calculate 
+
+			//---------------------------------
+			if(numOfSamples == 1)
+			{
+				for(int i = 0; i<TARGETIMGS; i++)
+					normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap, SPMapPitch, (row + 1) + i * refImageHeight, col );	// in the first round I only choose 1 sample. And SPMap is chosen from 
+			}
+			else
+			{
+				//for(int i = 0; i<TARGETIMGS; i++)
+				//	normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) /*/ (sumOfSPMap[threadId] + FLT_MIN )*/;	// devide by 0
+				for(int i = 0; i<TARGETIMGS; i++)
+					normalizedSPMap[i * N + threadId ] = (accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) 
+						+ accessPitchMemory(SPMap, SPMapPitch, (row + 1) + i * refImageHeight, col) )/2.0f;		// average of the near two
+			}
+
+			//---------------------------------
+			for(int i = 1; i<TARGETIMGS; i++)		
+				normalizedSPMap[i * N + threadId] += normalizedSPMap[(i-1) * N + threadId ];
+			// normalize
+			sumOfSPMap[threadId] = normalizedSPMap[N * (TARGETIMGS - 1) + threadId];
+			for(int i = 0; i<TARGETIMGS; i++)
+				normalizedSPMap[i * N + threadId] /= sumOfSPMap[threadId];
+
+			// draw samples and set the bit to 0
+			float numOfTestedSamples = 0;
+			float cost[3] = {0.0f};
+
+			// here it is better to generate a random depthmap
+			float randDepth;
+			if(!isRotated)	
+				randDepth = drawRandNum(randState, randStatePitch, col, row, depthRangeNear, depthRangeFar);
+			else
+				randDepth = drawRandNum(randState, randStatePitch, row, col, depthRangeNear, depthRangeFar);
+
+			for(int j = 0; j < numOfSamples; j++)
+			{
+				float randNum; 
+				if(!isRotated)
+					randNum = drawRandNum(randState, randStatePitch, col, row, 0.0f, 1.0f);				
+				else
+					randNum = drawRandNum(randState, randStatePitch, row, col, 0.0f, 1.0f);
+
+				int imageId = -1;				
+				for(int i = 0; i < TARGETIMGS; i++)
+				{
+					if(randNum <= normalizedSPMap[i * N + threadId ])
+					{
+						unsigned int &stateByte = selectedImages[(i>>5) * N + threadId];
+						unsigned int pos = i - (sizeof(int) << 3) * (i>>5);  //(i - i /32 * numberOfBitsPerInt)
+						// check the bit first and set imageId
+						//bool state = CHECK_BIT(stateByte,pos);
+						//if(!state) // if not set, then the images are not tested before. So 
+						if(!CHECK_BIT(stateByte,pos))
+						{
+							imageId = i;
+							numOfTestedSamples++;
+						}
+						// then set the bit
+						SET_BIT(stateByte, pos);	// 
+						break;
+					}
+				}
+				// image id is i( id != -1). Test the id using NCC, with 3 different depth. 				
+				if(imageId != -1)
+				{
+					//computeNCC(int imageId, float centerRow, float centerCol, float depth, int halfWindowSize);
+					cost[0] +=  computeNCC(imageId, (float)row, (float)col, depth_former_array[threadId], halfWindowSize, isRotated);			// accumulate the cost
+					cost[1] +=  computeNCC(imageId, (float)row, (float)col, depth_current_array[threadId], halfWindowSize, isRotated);
+					cost[2] +=  computeNCC(imageId, (float)row, (float)col, randDepth, halfWindowSize, isRotated);
+				}
+			}			
+			// find the minimum cost id, and then put cost into global memory 
+			cost[0] /= numOfTestedSamples; cost[1] /= numOfTestedSamples; cost[2] /= numOfTestedSamples;
+		
+			int idx = findMinCost(cost);
+			float bestDepth;
+			if(idx == 0)
+			{
+				writePitchMemory(depthMap, depthMapPitch, row, col, depth_former_array[threadId] );
+				bestDepth = depth_former_array[threadId];
+			}
+			else if(idx ==1)
+			{
+				writePitchMemory(depthMap, depthMapPitch, row, col, depth_current_array[threadId] );
+				bestDepth = depth_current_array[threadId];
+			}
+			else
+			{
+				writePitchMemory(depthMap, depthMapPitch, row, col, randDepth );
+				bestDepth = randDepth;
+			}
+			// Here I need to calculate SPMap based on the best depth, and put it into SPMap
+
+			float variance_inv = 1.0/(0.2 * 0.2);
+			for(int imageId = 0; imageId < TARGETIMGS; imageId++)
+			{
+				cost[0] = computeNCC(imageId, (float)row, (float)col, bestDepth, halfWindowSize, isRotated);
+				cost[0] = exp(-0.5 * cost[0] * cost[0] * variance_inv);
+				writePitchMemory(SPMap, SPMapPitch, (float)row + imageId * refImageHeight, (float)col, cost[0]);
+			}
+			// write depth
+			writePitchMemory(depthMap, depthMapPitch, (float)row, (float)col, bestDepth);
+
+			// swap depth former and depth current
+			depth_former_array[threadId] = bestDepth;
+		}
+	}
+}
 
 __global__ void testTextureArray_kernel()
 {
