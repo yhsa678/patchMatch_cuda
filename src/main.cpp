@@ -9,9 +9,9 @@ void main(int argc, char *argv[])
 
 	std::string fileName = argv[1];
 	float nearRange = 4.0;
-	float farRange = 13.5;
+	float farRange = 12;
 	int refImageId = 0; // the reference id starts from 0
-	int halfWindowSize = 8;
+	int halfWindowSize = 7;
 	int blockDim_x = 32;
 	int blockDim_y = 16;
 	int numOfSamples = 3;

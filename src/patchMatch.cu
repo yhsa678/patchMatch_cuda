@@ -2,6 +2,7 @@
 #include "cudaTranspose.h"
 #include "utility_CUDA.h"
 #include "GaussianBlurCUDA.h"
+#include  <sstream> 
 
 #define MAX_NUM_IMAGES 128
 
@@ -16,7 +17,7 @@ texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> refImgText
 __constant__ float transformHH[MAX_NUM_IMAGES * 9 * 2];
 
 #define N 32
-#define TARGETIMGS 8u
+#define TARGETIMGS 10u
 
 void PatchMatch::computeCUDAConfig(int width, int height, int blockDim_x, int blockDim_y)
 {
@@ -221,19 +222,18 @@ void PatchMatch::run()
 {
 	int numOfSamples;
 	bool isRotated;
-	std::cout<< "started" << std::endl;	CudaTimer t;	GaussianBlurCUDA gFilter(_refWidth, _refHeight, 5.0f);
-	//GaussianBlurCUDA gFilterT(_refHeight, _refWidth, 4.0f); // the width of gaussian kernel is sigma * 5.0 (sigma is the 3rd parameter)
-	GaussianBlurCUDA gFilterT(_depthMapT->getWidth(), _depthMapT->getHeight(), 5.0);
+	std::cout<< "started" << std::endl;	CudaTimer t;	GaussianBlurCUDA gFilter(_refWidth, _refHeight, 3.0f);
+	GaussianBlurCUDA gFilterT(_depthMapT->getWidth(), _depthMapT->getHeight(), 3.0);
 
 	for(int i = 0; i < 3; i++)
 	{
 	// left to right sweep
 //-----------------------------------------------------------
 		std::cout<< "Iteration " << i << " starts" << std::endl;		t.startRecord();
-		if(i == 0)
-			numOfSamples = 1; // ****
-		else
-			numOfSamples = _numOfSamples;
+		//if(i == 0)
+		//	numOfSamples = 1; // ****
+		//else
+		numOfSamples = _numOfSamples;
 		
 		transposeForward();
 		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
@@ -241,9 +241,7 @@ void PatchMatch::run()
 		topToDown<<<_gridSize, _blockSize>>>(_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
 			_SPMapT->_array2D, _SPMapT->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
-		
 		gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
-		//_SPMapT->saveToFile("_SPMapT.txt", 7);
 //-----------------------------------------------------------
 	// top to bottom sweep 
 		transposeBackward();
@@ -254,45 +252,34 @@ void PatchMatch::run()
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
 		gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
-		//_depthMap->saveToFile("depthMap.txt");
-		//_SPMap->saveToFile("_SPMap.txt");
 	////// right to left sweep
-
 		transposeForward();
 		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
 		isRotated = true;
 		downToTop<<<_gridSize, _blockSize>>>(_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
 			_SPMapT->_array2D, _SPMapT->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
-	//	t.stopRecord();
-		//_depthMapT->saveToFile("depthMap_transposed.txt");
 		gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
-		//if(i == 1)
-			//_depthMapT->saveToFile("depthMap_transposed.txt");
 		
 	////// bottom to top sweep
 		transposeBackward();
 		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), N, 1);
 		isRotated = false;
-	//	t.startRecord();
 		downToTop<<<_gridSize, _blockSize>>>(_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
-	//	if(i == 1)
 		gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
-
-	//	t.stopRecord();
-	//	std::cout<< "Iteration " << i << " ends" << std::endl;
 	}
 	_depthMap->saveToFile("depthMap.txt");
-	
-	//_depthMap->saveToFile("depthMap.txt");
+	for(int i = 0; i<10; i++)
+	{
+		std::stringstream ss; ss<<i;
+		std::string fileName = "_SPMap"+ ss.str() + ".txt";
+		_SPMap->saveToFile(fileName, i);
+	}
 	std::cout<< "ended " << std::endl;
 	// in the end I got the depthmap
-
 }
-
-
 
 inline __device__ float accessPitchMemory(float *data, int pitch, int row, int col)
 {
@@ -346,7 +333,6 @@ inline __device__ float computeNCC(int imageId, float centerRow, float centerCol
 			else
 				doTransform(&col_prime, &row_prime, row + 0.5f, col + 0.5f, imageId, depth);
 			float Iprime = tex2DLayered(allImgsTexture, col_prime + 0.5f, row_prime + 0.5f, imageId); // textures are not rotated
-
 			float I;
 			if(!isRotated)
 				I = tex2DLayered( refImgTexture, col + 0.5f, row + 0.5f, imageId);
@@ -362,17 +348,8 @@ inline __device__ float computeNCC(int imageId, float centerRow, float centerCol
 	}	
 	float windowSize = halfWindowSize * 2.0f + 1.0f;
 	windowSize *= windowSize;
-	//inverseWindowSize = 1.0f / (inverseWindowSize * inverseWindowSize);
-	//float cost = (sum_I_I - 1.0f/(2*halfWindowSize + 1) * sum_I * sum_I) * (sum_Iprime_Iprime - 1.0/(2*halfWindowSize + 1) * sum_Iprime * sum_Iprime );
 	float cost = ((sum_I_I - sum_I * sum_I/windowSize) * (sum_Iprime_Iprime - sum_Iprime * sum_Iprime/windowSize )); 
 	cost = cost <=0? 0 : sqrt(cost);
-
-	//if(!(cost == cost))
-	//{
-	//	//printf("Here is the problem: %f %f %f \n", cost,  sum_I_I -   sum_I * sum_I/windowSize,  sum_Iprime_Iprime -  sum_Iprime * sum_Iprime/windowSize);
-	//	printf("sum_Iprime_Iprime: %f, sum_Iprime * sum_Iprime/windowSize: %f \n", sum_Iprime_Iprime, sum_Iprime * sum_Iprime/windowSize );
-	//}
-
 	if(cost == 0)
 		return 2; // very small color consistency
 	else
@@ -407,12 +384,8 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 		for( int row = 1; row < refImageHeight; ++row)
 		{
 			depth_current_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col); 
-			
-			//if(threadId < N * s) // fix N = 32, it equals number of threads per block
 			for(int i = 0; i<s; i++)
 				selectedImages[threadId + i * N] = 0;	// initialized to false
-			//__syncthreads();	// Here to syncthreads as we need to calculate 
-
 			//---------------------------------
 			if(numOfSamples == 1)
 			{
@@ -421,13 +394,10 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 			}
 			else
 			{
-				//for(int i = 0; i<TARGETIMGS; i++)
-				//	normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) /*/ (sumOfSPMap[threadId] + FLT_MIN )*/;	// devide by 0
 				for(int i = 0; i<TARGETIMGS; i++)
 					normalizedSPMap[i * N + threadId ] = (accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) 
 						+ accessPitchMemory(SPMap, SPMapPitch, row-1 + i * refImageHeight, col) )/2.0f;		// average of the near two
 			}
-
 			//---------------------------------
 			for(int i = 1; i<TARGETIMGS; i++)		
 				normalizedSPMap[i * N + threadId] += normalizedSPMap[(i-1) * N + threadId ];
@@ -456,15 +426,12 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 					randNum = drawRandNum(randState, randStatePitch, row, col, 0.0f, 1.0f);
 
 				int imageId = -1;				
-				for(int i = 0; i < TARGETIMGS; i++)
+				for(unsigned int i = 0; i < TARGETIMGS; i++)
 				{
 					if(randNum <= normalizedSPMap[i * N + threadId ])
 					{
 						unsigned int &stateByte = selectedImages[(i>>5) * N + threadId];
 						unsigned int pos = i - (sizeof(int) << 3) * (i>>5);  //(i - i /32 * numberOfBitsPerInt)
-						// check the bit first and set imageId
-						//bool state = CHECK_BIT(stateByte,pos);
-						//if(!state) // if not set, then the images are not tested before. So 
 						if(!CHECK_BIT(stateByte,pos))
 						{
 							imageId = i;
@@ -511,13 +478,10 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 			{
 				cost[0] = computeNCC(imageId, (float)row, (float)col, bestDepth, halfWindowSize, isRotated);
 				cost[0] = exp(-0.5 * cost[0] * cost[0] * variance_inv);
-			//	if(!(cost[0] == cost[0]))
-			//		printf("here is problem %f: %f\n", cost[0], bestDepth);
 				writePitchMemory(SPMap, SPMapPitch, (float)row + imageId * refImageHeight, (float)col, cost[0]); // write SPMap
 			}
 			// write depth
 			writePitchMemory(depthMap, depthMapPitch, (float)row, (float)col, bestDepth);
-
 			// swap depth former and depth current
 			depth_former_array[threadId] = bestDepth;
 		}
@@ -538,18 +502,12 @@ __global__ void downToTop(int refImageWidth, int refImageHeight, float *depthMap
 		__shared__ float normalizedSPMap[N * TARGETIMGS]; // need plus 1 here ****. It seems not necessary
 		unsigned int s = (TARGETIMGS >> 5) + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
 		__shared__ unsigned int selectedImages[ N * ( TARGETIMGS >>5) + N ]; // this is N * s
-
 		depth_former_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, refImageHeight - 2, col); 	// depth for 1st element
-		//for( int row = 1; row < refImageHeight; ++row)
 		for(int row = refImageHeight - 2; row >=0; --row)
 		{
 			depth_current_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col); 
-			
-			//if(threadId < N * s) // fix N = 32, it equals number of threads per block
 			for(int i = 0; i<s; i++)
 				selectedImages[threadId + i * N] = 0;	// initialized to false
-			//__syncthreads();	// Here to syncthreads as we need to calculate 
-
 			//---------------------------------
 			if(numOfSamples == 1)
 			{
@@ -599,9 +557,6 @@ __global__ void downToTop(int refImageWidth, int refImageHeight, float *depthMap
 					{
 						unsigned int &stateByte = selectedImages[(i>>5) * N + threadId];
 						unsigned int pos = i - (sizeof(int) << 3) * (i>>5);  //(i - i /32 * numberOfBitsPerInt)
-						// check the bit first and set imageId
-						//bool state = CHECK_BIT(stateByte,pos);
-						//if(!state) // if not set, then the images are not tested before. So 
 						if(!CHECK_BIT(stateByte,pos))
 						{
 							imageId = i;
