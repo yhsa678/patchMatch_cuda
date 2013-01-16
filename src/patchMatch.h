@@ -56,7 +56,6 @@ public:
 
 	~PatchMatch();
 	
-	void testTextureArray();
 
 private:
 	void copyData(const std::vector<Image> &allImage, int referenceId);
