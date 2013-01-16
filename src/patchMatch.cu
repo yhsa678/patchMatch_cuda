@@ -222,14 +222,17 @@ void PatchMatch::run()
 {
 	int numOfSamples;
 	bool isRotated;
-	std::cout<< "started" << std::endl;	CudaTimer t;	GaussianBlurCUDA gFilter(_refWidth, _refHeight, 3.0f);
+	std::cout<< "started" << std::endl;
+	CudaTimer t;
+	GaussianBlurCUDA gFilter(_refWidth, _refHeight, 3.0f);
 	GaussianBlurCUDA gFilterT(_depthMapT->getWidth(), _depthMapT->getHeight(), 3.0);
 
 	for(int i = 0; i < 3; i++)
 	{
 	// left to right sweep
 //-----------------------------------------------------------
-		std::cout<< "Iteration " << i << " starts" << std::endl;		t.startRecord();
+		std::cout<< "Iteration " << i << " starts" << std::endl;
+		t.startRecord();
 		//if(i == 0)
 		//	numOfSamples = 1; // ****
 		//else
