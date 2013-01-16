@@ -1,0 +1,41 @@
+cmake_minimum_required(VERSION 2.7)	
+project(patchMatch)
+find_package(CUDA REQUIRED)
+
+
+set(OPENCV_INCLUDE "F:/Enliang/library_32/opencv/build_32_v10/install/include/")
+set(OPENCV_LIB_PATH "F:/Enliang/library_32/opencv/build_32_v10/install/lib/")
+set(IMDEBUG_PATH "F:/Enliang/library_32/imdebug-1.13b-bin")
+
+set(CUDA_NVCC_FLAGS  -arch=sm_20 )
+#set(CUDA_NVCC_FLAGS  -arch=sm_20)
+
+include_directories(
+					${OPENCV_INCLUDE}
+					${IMDEBUG_PATH}
+					)
+link_directories(
+				${OPENCV_LIB_PATH}
+				${IMDEBUG_PATH}
+			)
+
+cuda_add_executable(patchMatch src/Image.h src/Image.cpp 
+						src/main.cpp
+						src/patchMatch.h src/patchMatch.cu
+						src/utility_CUDA.h src/utility_CUDA.cpp
+						src/cudaArray_wrapper.h src/cudaArray_wrapper.cpp
+						src/array2d_wrapper.h src/array2d_wrapper.cu
+						src/array2d_psng.h src/array2d_psng.cu
+						src/cudaTranspose.h src/cudaTranspose.cu
+						src/GaussianBlurCUDA.h src/GaussianBlurCUDA.cu
+						)
+
+
+
+target_link_libraries(patchMatch 
+						debug opencv_highgui242d.lib optimized opencv_highgui242.lib
+						debug opencv_core242d.lib	optimized opencv_core242.lib
+						debug opencv_imgproc242d.lib optimized opencv_imgproc242.lib
+						debug imdebug.lib 			 optimized imdebug.lib
+					
+					)
