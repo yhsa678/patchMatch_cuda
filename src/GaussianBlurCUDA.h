@@ -9,6 +9,7 @@ public:
 	~GaussianBlurCUDA();
 	int Filter( float* dst, const float* src );
 	void Filter(cudaArray *dst, cudaArray *src);
+	int FilterMultipleImages(float *data, int pitch, int depth);
 private:
 	template<int FR> void FilterImage(cudaArray *dst, cudaArray *src); //filter width
 	void CreateFilterKernel(float sigma, float* kernel, int& width);

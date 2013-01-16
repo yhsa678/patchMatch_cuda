@@ -4,13 +4,17 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <string>
-#include <imdebug.h>
+
+//#ifndef _WIN64
+//#include <imdebug.h>
+//#endif
+
 #include <thrust/device_vector.h>
 #include <thrust/device_ptr.h>
 #include <iostream>
 #include <iterator>
 
-//#include "imdebug.h"
+
 #define CUDA_SAFE_CALL(err) _CUDA_SAFE_CALL( err,__FILE__, __LINE__)
 #define CudaCheckError()    __cudaCheckError( __FILE__, __LINE__ )
 

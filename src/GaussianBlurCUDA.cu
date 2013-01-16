@@ -3,7 +3,7 @@
 #include <string.h>
 //#include <cutil_inline.h>
 #include "GaussianBlurCUDA.h"
-
+#include "utility_CUDA.h"
 
 //filter kernel width range (don't change these)
 #define KERNEL_MAX_WIDTH 45       //do not change!!!
@@ -179,5 +179,19 @@ int GaussianBlurCUDA::Filter( float* dst, const float* src )
 	cudaMemcpyToArray(m_cuaSrc, 0, 0, src, m_nWidth * m_nHeight * sizeof(float), cudaMemcpyHostToDevice);
 	Filter(m_cuaBlur, m_cuaSrc);
 	cudaMemcpy(dst, m_buf32FA, m_nWidth * m_nHeight * sizeof(float), cudaMemcpyDeviceToHost); //GPU memory to CPU memory copy - slow!!!
+	return 0;
+}
+
+
+int GaussianBlurCUDA::FilterMultipleImages(float *data, int pitch, int depth)
+{
+	for(int i = 0; i < depth; i++)
+	{
+		CUDA_SAFE_CALL(cudaMemcpy2DToArray(m_cuaSrc, 0, 0, data + i * pitch/sizeof(float)  * m_nHeight, pitch, m_nWidth * sizeof(float), m_nHeight, cudaMemcpyDeviceToDevice));
+		Filter(m_cuaBlur, m_cuaSrc);
+		CudaCheckError();
+		CUDA_SAFE_CALL(cudaMemcpy2DFromArray(data + i * pitch/sizeof(float) * m_nHeight, pitch, m_cuaBlur, 0, 0, m_nWidth * sizeof(float), m_nHeight, cudaMemcpyDeviceToDevice)); 
+		//CUDA_SAFE_CALL(cudaMemcpy2DFromArray(data + i * pitch/sizeof(float) * m_nHeight, pitch, m_cuaSrc, 0, 0, m_nWidth * sizeof(float), m_nHeight, cudaMemcpyDeviceToDevice)); 
+	}
 	return 0;
 }

@@ -1,6 +1,7 @@
 #include "patchMatch.h"
 #include "cudaTranspose.h"
 #include "utility_CUDA.h"
+#include "GaussianBlurCUDA.h"
 
 #define MAX_NUM_IMAGES 128
 
@@ -14,8 +15,8 @@ texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> allImgsTex
 texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> refImgTexture;
 __constant__ float transformHH[MAX_NUM_IMAGES * 9 * 2];
 
-#define N 64
-#define TARGETIMGS 2u
+#define N 32
+#define TARGETIMGS 8u
 
 void PatchMatch::computeCUDAConfig(int width, int height, int blockDim_x, int blockDim_y)
 {
@@ -184,7 +185,6 @@ PatchMatch::~PatchMatch()
 		delete _SPMapT;
 	if(_depthMapT != NULL)
 		delete _depthMapT;
-	
 
 }
 
@@ -204,90 +204,89 @@ void PatchMatch::transpose(Array2D_wrapper<float> *input, Array2D_wrapper<float>
 
 }
 
-//void PatchMatch::transpose(Array2D_psng *input, Array2D_psng *output)
-//{
-//	//cudaTranspose::transpose2dData( input->_array2D, output->_array2D, input->getWidth(), input->getHeight(), output->_pitchData, output->_pitchData);
-//}
 
 void PatchMatch::transposeForward()
 {
 	transpose(_depthMap, _depthMapT);
 	transpose(_SPMap, _SPMapT);
-	//transpose(_randDepth, _randDepthT);
 }
 
 void PatchMatch::transposeBackward()
 {
 	transpose(_depthMapT, _depthMap);
 	transpose(_SPMapT, _SPMap);
-	//transpose(_randDepthT, randDepth);
 }
 
 void PatchMatch::run()
 {
 	int numOfSamples;
 	bool isRotated;
-	std::cout<< "started" << std::endl;
-	for(int i = 0; i<1; i++)
+	std::cout<< "started" << std::endl;	CudaTimer t;	GaussianBlurCUDA gFilter(_refWidth, _refHeight, 5.0f);
+	//GaussianBlurCUDA gFilterT(_refHeight, _refWidth, 4.0f); // the width of gaussian kernel is sigma * 5.0 (sigma is the 3rd parameter)
+	GaussianBlurCUDA gFilterT(_depthMapT->getWidth(), _depthMapT->getHeight(), 5.0);
+
+	for(int i = 0; i < 3; i++)
 	{
 	// left to right sweep
 //-----------------------------------------------------------
+		std::cout<< "Iteration " << i << " starts" << std::endl;		t.startRecord();
 		if(i == 0)
 			numOfSamples = 1; // ****
 		else
 			numOfSamples = _numOfSamples;
-
-		CudaTimer t;
 		
-	/*	transposeForward();
+		transposeForward();
 		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
 		isRotated = true;
-		t.startRecord();
 		topToDown<<<_gridSize, _blockSize>>>(_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
 			_SPMapT->_array2D, _SPMapT->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
-		t.stopRecord();*/
-
 		
+		gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
+		//_SPMapT->saveToFile("_SPMapT.txt", 7);
 //-----------------------------------------------------------
 	// top to bottom sweep 
-		/*transposeBackward();
+		transposeBackward();
 		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), N, 1);
 		isRotated = false;
-		t.startRecord();
+		//t.startRecord();
 		topToDown<<<_gridSize, _blockSize>>>(_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
-		t.stopRecord();
+		gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
+		//_depthMap->saveToFile("depthMap.txt");
+		//_SPMap->saveToFile("_SPMap.txt");
+	////// right to left sweep
 
-		_depthMap->saveToFile("depthMap.txt");*/
-
-	//	
-
-	//// right to left sweep
-	/*	transposeForward();
+		transposeForward();
 		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
 		isRotated = true;
-		t.startRecord();
 		downToTop<<<_gridSize, _blockSize>>>(_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
 			_SPMapT->_array2D, _SPMapT->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
-		t.stopRecord();
-		_depthMapT->saveToFile("depthMap_transposed.txt");*/
-
-	//// bottom to top sweep
-
+	//	t.stopRecord();
+		//_depthMapT->saveToFile("depthMap_transposed.txt");
+		gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
+		//if(i == 1)
+			//_depthMapT->saveToFile("depthMap_transposed.txt");
+		
+	////// bottom to top sweep
 		transposeBackward();
-		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), 32, 1);
+		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), N, 1);
 		isRotated = false;
-		t.startRecord();
+	//	t.startRecord();
 		downToTop<<<_gridSize, _blockSize>>>(_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
-		t.stopRecord();
-		_depthMap->saveToFile("depthMap.txt");
+	//	if(i == 1)
+		gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
 
+	//	t.stopRecord();
+	//	std::cout<< "Iteration " << i << " ends" << std::endl;
 	}
+	_depthMap->saveToFile("depthMap.txt");
+	
+	//_depthMap->saveToFile("depthMap.txt");
 	std::cout<< "ended " << std::endl;
 	// in the end I got the depthmap
 
@@ -346,11 +345,11 @@ inline __device__ float computeNCC(int imageId, float centerRow, float centerCol
 				doTransform(&col_prime, &row_prime, col + 0.5f, row + 0.5f, imageId, depth);
 			else
 				doTransform(&col_prime, &row_prime, row + 0.5f, col + 0.5f, imageId, depth);
-			float Iprime = tex2DLayered(allImgsTexture, col_prime + 0.5, row_prime + 0.5, imageId); // textures are not rotated
+			float Iprime = tex2DLayered(allImgsTexture, col_prime + 0.5f, row_prime + 0.5f, imageId); // textures are not rotated
 
 			float I;
 			if(!isRotated)
-				I = tex2DLayered( refImgTexture, col + 0.5f, row + 0.5f,  imageId);
+				I = tex2DLayered( refImgTexture, col + 0.5f, row + 0.5f, imageId);
 			else
 				I = tex2DLayered( refImgTexture, row + 0.5f, col + 0.5f, imageId);
 
@@ -361,15 +360,25 @@ inline __device__ float computeNCC(int imageId, float centerRow, float centerCol
 			sum_Iprime += Iprime;
 		}
 	}	
-	float inverseWindowSize = halfWindowSize * 2.0f + 1.0f;
-	inverseWindowSize = 1.0f / (inverseWindowSize * inverseWindowSize);
+	float windowSize = halfWindowSize * 2.0f + 1.0f;
+	windowSize *= windowSize;
+	//inverseWindowSize = 1.0f / (inverseWindowSize * inverseWindowSize);
 	//float cost = (sum_I_I - 1.0f/(2*halfWindowSize + 1) * sum_I * sum_I) * (sum_Iprime_Iprime - 1.0/(2*halfWindowSize + 1) * sum_Iprime * sum_Iprime );
-	float cost = sqrt((sum_I_I - inverseWindowSize * sum_I * sum_I) * (sum_Iprime_Iprime - inverseWindowSize * sum_Iprime * sum_Iprime )); 
+	float cost = ((sum_I_I - sum_I * sum_I/windowSize) * (sum_Iprime_Iprime - sum_Iprime * sum_Iprime/windowSize )); 
+	cost = cost <=0? 0 : sqrt(cost);
+
+	//if(!(cost == cost))
+	//{
+	//	//printf("Here is the problem: %f %f %f \n", cost,  sum_I_I -   sum_I * sum_I/windowSize,  sum_Iprime_Iprime -  sum_Iprime * sum_Iprime/windowSize);
+	//	printf("sum_Iprime_Iprime: %f, sum_Iprime * sum_Iprime/windowSize: %f \n", sum_Iprime_Iprime, sum_Iprime * sum_Iprime/windowSize );
+	//}
 
 	if(cost == 0)
 		return 2; // very small color consistency
 	else
-		return 1 - (sum_I_Iprime - inverseWindowSize * sum_I * sum_Iprime )/cost;
+	{
+		return 1 - (sum_I_Iprime -  sum_I * sum_Iprime/windowSize )/(cost);
+	}
 }
 
 inline __device__ int findMinCost(float *cost)
@@ -502,7 +511,9 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 			{
 				cost[0] = computeNCC(imageId, (float)row, (float)col, bestDepth, halfWindowSize, isRotated);
 				cost[0] = exp(-0.5 * cost[0] * cost[0] * variance_inv);
-				writePitchMemory(SPMap, SPMapPitch, (float)row + imageId * refImageHeight, (float)col, cost[0]);
+			//	if(!(cost[0] == cost[0]))
+			//		printf("here is problem %f: %f\n", cost[0], bestDepth);
+				writePitchMemory(SPMap, SPMapPitch, (float)row + imageId * refImageHeight, (float)col, cost[0]); // write SPMap
 			}
 			// write depth
 			writePitchMemory(depthMap, depthMapPitch, (float)row, (float)col, bestDepth);

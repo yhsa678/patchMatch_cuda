@@ -38,16 +38,26 @@ public:
 	void copyData(T* destPtr, size_t destPitch, enum cudaMemcpyKind kind)
 	{
 		// cudaMemcpyHostToDevice, cudaMemcpyDeviceToHost
-		CUDA_SAFE_CALL(cudaMemcpy2D(destPtr, destPitch, _array2D, _pitchData, 	_width * sizeof(T), _height*_depth,	kind));
+		CUDA_SAFE_CALL(cudaMemcpy2D((void *)destPtr, destPitch, (void *)_array2D, _pitchData, 	_width * sizeof(T),  _height*_depth, 	kind));
 	}
 
 	void saveToFile(std::string fileName)
 	{
 		std::fstream fout(fileName, 'w');
 		T *destPtr = new T[_width * _height * _depth];
-		copyData(destPtr, _width * sizeof(T), cudaMemcpyDeviceToHost);
+		copyData(destPtr, _width * sizeof(T) , cudaMemcpyDeviceToHost);
 		std::copy(destPtr, destPtr + _width * _height * _depth, std::ostream_iterator<T>(fout, " "));
 	
+		delete []destPtr;
+		fout.close();
+	}
+
+	void saveToFile(std::string fileName, int layer)
+	{
+		std::fstream fout(fileName, 'w');
+		T * destPtr = new T[_width * _height];
+		CUDA_SAFE_CALL(cudaMemcpy2D((void *)destPtr, _width * sizeof(T), (void *)(_array2D + layer * _height * _pitchData/sizeof(T)), _pitchData, 	_width * sizeof(T),  _height, 	cudaMemcpyDeviceToHost));
+		std::copy(destPtr, destPtr + _width * _height, std::ostream_iterator<T>(fout, "\n"));
 		delete []destPtr;
 		fout.close();
 	}

@@ -3,16 +3,19 @@
 
 void _CUDA_SAFE_CALL( cudaError_t err, std::string file, int line)
 {
+//#ifdef _DEBUG
 	if (err != cudaSuccess) {
 		//std::cout<< cudaGetErrorString( err ) << " in file: " << file << " at line: " << line << std::endl;
 		printf( "%s in %s at line %i\n", cudaGetErrorString( err ),
 			file.c_str(), line );
 		exit( EXIT_FAILURE );
 	}
+//#endif
 }
 
 void __cudaCheckError( const char *file, const int line )
 {
+//#ifdef _DEBUG
 	cudaError err = cudaGetLastError();
 	if ( cudaSuccess != err )
 	{
@@ -31,17 +34,23 @@ void __cudaCheckError( const char *file, const int line )
 		exit( -1 );
 	}
 	return;
+//#endif
 }
 
 
 void showGreyImage(unsigned char *data, int width, int height)
 {
-	imdebug("lum b=8 w=%d h=%d %p", width, height, data);
+//#ifndef _WIN64
+//	imdebug("lum b=8 w=%d h=%d %p", width, height, data);
+//#endif
 }
 
 void showRGBImage(unsigned char *data, int width, int height)
 {
-	imdebug("rgb w=%d h=%d %p", width, height, data);
+//#ifndef _WIN64
+//	imdebug("rgb w=%d h=%d %p", width, height, data);
+//#endif
+
 }
 
 void viewData1DDevicePointer(float * data, int size)
