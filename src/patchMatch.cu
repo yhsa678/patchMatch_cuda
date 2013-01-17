@@ -416,8 +416,8 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 		__shared__ unsigned int selectedImages[ N * ( TARGETIMGS >>5) + N ]; // this is N * s
 		depth_former_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, 0, col); 	// depth for 1st element
 		
-		for(int i = 0; i<TARGETIMGS; i++)
-			normalizedSPMap_former[i*N + threadId] = accessPitchMemory(SPMap, SPMapPitch, i * refImageHeight + 0, col );
+		//for(int i = 0; i<TARGETIMGS; i++)
+		//	normalizedSPMap_former[i*N + threadId] = accessPitchMemory(SPMap, SPMapPitch, i * refImageHeight + 0, col );
 
 		__shared__ curandState localState[N];		
 		if(!isRotated)
@@ -433,16 +433,16 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 			if(numOfSamples == 1)
 			{
 				for(int i = 0; i<TARGETIMGS; i++)
-					normalizedSPMap[i*N + threadId] = normalizedSPMap_former[i*N + threadId];
-					//normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap, SPMapPitch, row-1 + i * refImageHeight, col );	// in the first round I only choose 1 sample. And SPMap is chosen from 
+					//normalizedSPMap[i*N + threadId] = normalizedSPMap_former[i*N + threadId];
+					normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap, SPMapPitch, row-1 + i * refImageHeight, col );	// in the first round I only choose 1 sample. And SPMap is chosen from 
 			}
 			else
 			{
 				for(int i = 0; i<TARGETIMGS; i++)
-					//normalizedSPMap[i * N + threadId ] = (accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) 
-					//	+ accessPitchMemory(SPMap, SPMapPitch, row-1 + i * refImageHeight, col) )/2.0f;		// average of the near two
-					normalizedSPMap[i * N + threadId ] = (normalizedSPMap_former[i*N + threadId] 
-						+ accessPitchMemory(SPMap, SPMapPitch, row + i * refImageHeight, col) )/2.0f;
+					normalizedSPMap[i * N + threadId ] = (accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) 
+						+ accessPitchMemory(SPMap, SPMapPitch, row-1 + i * refImageHeight, col) )/2.0f;		// average of the near two
+					//normalizedSPMap[i * N + threadId ] = (normalizedSPMap_former[i*N + threadId] 
+					//	+ accessPitchMemory(SPMap, SPMapPitch, row + i * refImageHeight, col) )/2.0f;
 			}
 			//---------------------------------
 			for(int i = 1; i<TARGETIMGS; i++)		
@@ -528,7 +528,7 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 			{
 				cost[0] = computeNCC(imageId, (float)row, (float)col, bestDepth, halfWindowSize, isRotated, (float)refImageWidth, (float)refImageHeight);
 				cost[0] = exp(-0.5 * cost[0] * cost[0] * variance_inv);
-				normalizedSPMap_former[imageId * N + threadId] = cost[0];
+				//normalizedSPMap_former[imageId * N + threadId] = cost[0];
 				writePitchMemory(SPMap, SPMapPitch, (float)row + imageId * refImageHeight, (float)col, cost[0]); // write SPMap
 			}
 			// write depth
@@ -559,8 +559,8 @@ __global__ void downToTop(int refImageWidth, int refImageHeight, float *depthMap
 		__shared__ unsigned int selectedImages[ N * ( TARGETIMGS >>5) + N ]; // this is N * s
 		depth_former_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, refImageHeight - 1, col); 	// depth for 1st element
 
-		for(int i = 0; i<TARGETIMGS; i++)
-			normalizedSPMap_former[i*N + threadId] = accessPitchMemory(SPMap, SPMapPitch, i * refImageHeight + refImageHeight - 1, col );
+		//for(int i = 0; i<TARGETIMGS; i++)
+		//	normalizedSPMap_former[i*N + threadId] = accessPitchMemory(SPMap, SPMapPitch, i * refImageHeight + refImageHeight - 1, col );
 
 		__shared__ curandState localState[N];
 		if(!isRotated)
@@ -577,18 +577,18 @@ __global__ void downToTop(int refImageWidth, int refImageHeight, float *depthMap
 			if(numOfSamples == 1)
 			{
 				for(int i = 0; i<TARGETIMGS; i++)
-					//normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap, SPMapPitch, (row + 1) + i * refImageHeight, col );	// in the first round I only choose 1 sample. And SPMap is chosen from 
-					normalizedSPMap[i*N + threadId] = normalizedSPMap_former[i*N + threadId];
+					normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap, SPMapPitch, (row + 1) + i * refImageHeight, col );	// in the first round I only choose 1 sample. And SPMap is chosen from 
+					//normalizedSPMap[i*N + threadId] = normalizedSPMap_former[i*N + threadId];
 			}
 			else
 			{
 				//for(int i = 0; i<TARGETIMGS; i++)
 				//	normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) /*/ (sumOfSPMap[threadId] + FLT_MIN )*/;	// devide by 0
 				for(int i = 0; i<TARGETIMGS; i++)
-				//	normalizedSPMap[i * N + threadId ] = (accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) 
-					//	+ accessPitchMemory(SPMap, SPMapPitch, (row + 1) + i * refImageHeight, col) )/2.0f;		// average of the near two
-					normalizedSPMap[i * N + threadId ] = (normalizedSPMap_former[i*N + threadId] 
-						+ accessPitchMemory(SPMap, SPMapPitch, row + i * refImageHeight, col) )/2.0f;
+					normalizedSPMap[i * N + threadId ] = (accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) 
+						+ accessPitchMemory(SPMap, SPMapPitch, (row + 1) + i * refImageHeight, col) )/2.0f;		// average of the near two
+					//normalizedSPMap[i * N + threadId ] = (normalizedSPMap_former[i*N + threadId] 
+					//	+ accessPitchMemory(SPMap, SPMapPitch, row + i * refImageHeight, col) )/2.0f;
 			}
 
 			//---------------------------------
@@ -673,7 +673,7 @@ __global__ void downToTop(int refImageWidth, int refImageHeight, float *depthMap
 				{
 					cost[0] = computeNCC(imageId, (float)row, (float)col, bestDepth, halfWindowSize, isRotated, (float)refImageWidth, (float)refImageHeight);
 					cost[0] = exp(-0.5 * cost[0] * cost[0] * variance_inv);
-					normalizedSPMap_former[imageId * N + threadId] = cost[0];
+					//normalizedSPMap_former[imageId * N + threadId] = cost[0];
 					writePitchMemory(SPMap, SPMapPitch, (float)row + imageId * refImageHeight, (float)col, cost[0]);
 				}
 			// write depth
