@@ -7,8 +7,8 @@ set(OPENCV_INCLUDE "F:/Enliang/library_32/opencv/build_32_v10/install/include/")
 set(OPENCV_LIB_PATH "F:/Enliang/library_32/opencv/build_32_v10/install/lib/")
 set(IMDEBUG_PATH "F:/Enliang/library_32/imdebug-1.13b-bin")
 
-set(CUDA_NVCC_FLAGS  -arch=sm_20 )
-#set(CUDA_NVCC_FLAGS  -arch=sm_20)
+#set(CUDA_NVCC_FLAGS  -arch=sm_20 -G0)
+set(CUDA_NVCC_FLAGS  -arch=sm_20 --ptxas-options=-v --use_fast_math)
 
 include_directories(
 					${OPENCV_INCLUDE}
