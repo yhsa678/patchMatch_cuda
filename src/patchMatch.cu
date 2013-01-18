@@ -238,7 +238,8 @@ void PatchMatch::run()
 	{
 	// left to right sweep
 //-----------------------------------------------------------
-		std::cout<< "Iteration " << i << " starts" << std::endl;		t.startRecord();
+		std::cout<< "Iteration " << i << " starts" << std::endl;
+		t.startRecord();
 		//if(i == 0)
 		//	numOfSamples = 1; // ****
 		//else
@@ -417,7 +418,7 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 		__shared__ float depth_current_array[N]; 
 		__shared__ float sumOfSPMap[N]; 
 		__shared__ float normalizedSPMap[N * TARGETIMGS]; // need plus 1 here ****. It seems not necessary
-		__shared__ float normalizedSPMap_former[N * TARGETIMGS];
+//		__shared__ float normalizedSPMap_former[N * TARGETIMGS];
 		unsigned int s = (TARGETIMGS >> 5) + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
 		__shared__ unsigned int selectedImages[ N * ( TARGETIMGS >>5) + N ]; // this is N * s
 		depth_former_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, 0, col); 	// depth for 1st element
@@ -542,7 +543,8 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 			writePitchMemory(depthMap, depthMapPitch, (float)row, (float)col, bestDepth);
 			// swap depth former and depth current
 			depth_former_array[threadId] = bestDepth;
-		}		if(!isRotated)
+		}
+		if(!isRotated)
 			*(randState + col) = localState[threadId];
 		else
 			*((curandState*)((char*)randState + col * randStatePitch)) = localState[threadId];
@@ -561,7 +563,7 @@ __global__ void downToTop(int refImageWidth, int refImageHeight, float *depthMap
 		__shared__ float depth_current_array[N]; 
 		__shared__ float sumOfSPMap[N]; 
 		__shared__ float normalizedSPMap[N * TARGETIMGS]; // need plus 1 here ****. It seems not necessary
-		__shared__ float normalizedSPMap_former[N * TARGETIMGS];
+		//__shared__ float normalizedSPMap_former[N * TARGETIMGS];
 		unsigned int s = (TARGETIMGS >> 5) + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
 		__shared__ unsigned int selectedImages[ N * ( TARGETIMGS >>5) + N ]; // this is N * s
 		depth_former_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, refImageHeight - 1, col); 	// depth for 1st element
