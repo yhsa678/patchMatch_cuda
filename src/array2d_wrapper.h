@@ -35,10 +35,14 @@ public:
 	size_t getHeight();
 	size_t getDepth();
 
-	void copyData(T* destPtr, size_t destPitch, enum cudaMemcpyKind kind)
+	void copyData(T* ptr, size_t pitch, enum cudaMemcpyKind kind)
 	{
 		// cudaMemcpyHostToDevice, cudaMemcpyDeviceToHost
-		CUDA_SAFE_CALL(cudaMemcpy2D((void *)destPtr, destPitch, (void *)_array2D, _pitchData, 	_width * sizeof(T),  _height*_depth, 	kind));
+		if(kind == cudaMemcpyDeviceToHost)
+			CUDA_SAFE_CALL(cudaMemcpy2D((void *)ptr, pitch, (void *)_array2D, _pitchData, _width * sizeof(T),  _height*_depth, 	kind));
+		else
+			CUDA_SAFE_CALL(cudaMemcpy2D( (void *)_array2D, _pitchData, (void *)ptr, pitch, _width * sizeof(T) ,_height*_depth, 	kind));
+
 	}
 
 	void saveToFile(std::string fileName)

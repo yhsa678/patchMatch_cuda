@@ -32,6 +32,8 @@ public:
 	Array2D_wrapper<float> * _SPMap; // selection probability map
 	Array2D_wrapper<float> * _SPMapT;
 
+	
+
 	//Array2D_wrapper<float> * _randDepth;
 	//Array2D_wrapper<float> * _randDepthT;
 

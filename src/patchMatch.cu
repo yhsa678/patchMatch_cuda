@@ -163,6 +163,12 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 
 	_depthMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y);
 	_SPMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y, _numOfTargetImages);
+
+	// reference image
+	//_refImage = new Array2D_wrapper<char>( _refWidth, _refHeight, _blockDim_x, _blockDim_y);
+	//_refImage->copyData(_refImageDataBlock, _refWidth * sizeof(char), cudaMemcpyHostToDevice );
+	//_refImageT = new Array2D_wrapper<char>(_refHeight, _refWidth, _blockDim_x, _blockDim_y);
+
 }
 
 PatchMatch::~PatchMatch()
@@ -424,6 +430,7 @@ __global__ void topToDown(int refImageWidth, int refImageHeight, float *depthMap
 			localState[threadId] = *(randState + col);
 		else
 			localState[threadId] = *((curandState*)((char*)randState + col * randStatePitch));
+
 		for( int row = 1; row < refImageHeight; ++row)
 		{
 			depth_current_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col); 
