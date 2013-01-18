@@ -15,12 +15,15 @@ template<class T>
 class Array2D_wrapper{
 public:
 	T *_array2D;
-	size_t _pitchData;
+	int _pitchData;
 	Array2D_wrapper(int width, int height, int blockDim_x, int blockDim_y, int depth = 1):
 			_width(width), _height(height), _blockDim_x(blockDim_x), _blockDim_y(blockDim_y),
 				_depth(depth), _array2D(NULL)
 	{
-		CUDA_SAFE_CALL(cudaMallocPitch((void**)&_array2D, &_pitchData, _width * sizeof(T), _height * _depth));
+		size_t pitchData;
+		CUDA_SAFE_CALL(cudaMallocPitch((void**)&_array2D, &pitchData, static_cast<size_t>(_width * sizeof(T)), static_cast<size_t>(_height * _depth)));
+		_pitchData = static_cast<int>(pitchData);
+		
 		// compute grid and block size
 		computeCUDAConfig();
 	}
@@ -31,17 +34,17 @@ public:
 			CUDA_SAFE_CALL(cudaFree((void *) _array2D));
 	}
 	void randNumGen(float rangeStart, float rangeEnd, curandState * devStates, int pitchState);
-	size_t getWidth();
-	size_t getHeight();
-	size_t getDepth();
+	int getWidth();
+	int getHeight();
+	int getDepth();
 
-	void copyData(T* ptr, size_t pitch, enum cudaMemcpyKind kind)
+	void copyData(T* ptr, int pitch, enum cudaMemcpyKind kind)
 	{
 		// cudaMemcpyHostToDevice, cudaMemcpyDeviceToHost
 		if(kind == cudaMemcpyDeviceToHost)
-			CUDA_SAFE_CALL(cudaMemcpy2D((void *)ptr, pitch, (void *)_array2D, _pitchData, _width * sizeof(T),  _height*_depth, 	kind));
+			CUDA_SAFE_CALL(cudaMemcpy2D((void *)ptr, pitch, (void *)_array2D, (size_t)_pitchData, _width * sizeof(T),  _height*_depth, 	kind));
 		else
-			CUDA_SAFE_CALL(cudaMemcpy2D( (void *)_array2D, _pitchData, (void *)ptr, pitch, _width * sizeof(T) ,_height*_depth, 	kind));
+			CUDA_SAFE_CALL(cudaMemcpy2D( (void *)_array2D, (size_t)_pitchData, (void *)ptr, pitch, _width * sizeof(T) ,_height*_depth, 	kind));
 
 	}
 
@@ -69,9 +72,10 @@ public:
 protected:
 	void computeCUDAConfig();
 
-	size_t _width;
-	size_t _height;
-	size_t _depth;
+	//size_t _width;
+	int _height;
+	int _depth;
+	int _width;
 
 	dim3 _blockSize;
 	int _blockDim_x;
@@ -81,19 +85,19 @@ protected:
 };
 
 template<class T>
-size_t Array2D_wrapper<T> :: getHeight()
+int Array2D_wrapper<T> :: getHeight()
 {
 	return _height;
 }
 
 template<class T>
-size_t Array2D_wrapper<T> :: getWidth()
+int Array2D_wrapper<T> :: getWidth()
 {
 	return _width;
 }
 
 template<class T>
-size_t Array2D_wrapper<T> :: getDepth()
+int Array2D_wrapper<T> :: getDepth()
 {
 	return _depth;
 }

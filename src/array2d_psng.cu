@@ -20,7 +20,11 @@ void Array2D_psng::randStateGen()
 {
 	/* Allocate space for prng states on device */
 	if( _array2D == NULL)
-		CUDA_SAFE_CALL(  cudaMallocPitch( ( void **)& _array2D ,  &_pitchData,  _width * sizeof(curandState), _height));
+	{
+		size_t pitchData;
+		CUDA_SAFE_CALL(  cudaMallocPitch( ( void **)& _array2D ,  &pitchData,  _width * sizeof(curandState), _height));
+		_pitchData = static_cast<int>(pitchData);
+	}
 
 	/* Setup prng states */
 	setup_kernel <<<_gridSize, _blockSize>>>( _array2D,  _width,  _height, _pitchData );

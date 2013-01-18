@@ -5,6 +5,7 @@
 #include "cudaArray_wrapper.h"
 #include "array2d_wrapper.h"
 #include "array2d_psng.h"
+#include "array2d_refImg.h"
 #include <vector>
 #include <iostream>
 #include "image.h"
@@ -32,7 +33,9 @@ public:
 	Array2D_wrapper<float> * _SPMap; // selection probability map
 	Array2D_wrapper<float> * _SPMapT;
 
-	
+	Array2d_refImg *_refImage;
+	Array2d_refImg *_refImageT;
+
 
 	//Array2D_wrapper<float> * _randDepth;
 	//Array2D_wrapper<float> * _randDepthT;
@@ -62,7 +65,6 @@ public:
 private:
 	void copyData(const std::vector<Image> &allImage, int referenceId);
 	void transpose(Array2D_wrapper<float> *input, Array2D_wrapper<float> *output);
-//	void transpose(Array2D_psng *input, Array2D_psng *output);
 	void transposeForward();
 	void transposeBackward();
 
