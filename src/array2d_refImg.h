@@ -23,11 +23,13 @@ public:
 		_refImageData = new Array2D_wrapper<float>(refWidth, refHeight, blockDim_x, blockDim_y);
 
 		_tempArray = new CudaArray_wrapper(refWidth, refHeight, 1);
-		init(img);
+		_tempArray->array3DCopy<unsigned char>( img, cudaMemcpyHostToDevice);
 	}	Array2d_refImg(int refWidth, int refHeight, int blockDim_x, int blockDim_y ):_refHeight(refHeight), _refWidth(refWidth), _refImage_sum_I(NULL), _refImage_sum_II(NULL), _tempArray(NULL), _refImageData(NULL)
 	{
 		_refImage_sum_II = new Array2D_wrapper<float>(refWidth, refHeight, blockDim_x, blockDim_y);
 		_refImage_sum_I = new Array2D_wrapper<float>(refWidth, refHeight, blockDim_x, blockDim_y);
+		_refImageData = new Array2D_wrapper<float>(refWidth, refHeight, blockDim_x, blockDim_y);
+
 		_tempArray = new CudaArray_wrapper(refWidth, refHeight, 1);
 	}
 
@@ -44,7 +46,6 @@ public:
 	}	void filterImage(int halfWindowSize);
 private:
 	template<int FR> void filterImage();
-	void init(unsigned char *img );
 
 };
 

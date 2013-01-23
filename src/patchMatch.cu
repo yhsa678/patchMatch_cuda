@@ -132,24 +132,6 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 	// find maximum size of each dimension
 	copyData(allImage, _refImageId);
 	
-	// ---------- initialize array
-	_allImages_cudaArrayWrapper = new CudaArray_wrapper(_maxWidth, _maxHeight, _numOfTargetImages);
-	_refImages_cudaArrayWrapper = new CudaArray_wrapper(_refWidth, _refHeight, 1);
-
-	// ---------- upload image data to GPU
-	_allImages_cudaArrayWrapper->array3DCopy<unsigned char>(_imageDataBlock, cudaMemcpyHostToDevice);
-	_refImages_cudaArrayWrapper->array3DCopy<unsigned char>(_refImageDataBlock, cudaMemcpyHostToDevice);
-	// attach to texture so that the kernel can access the data
-	allImgsTexture.addressMode[0] = cudaAddressModeBorder; allImgsTexture.addressMode[1] = cudaAddressModeBorder; 
-	allImgsTexture.addressMode[2] = cudaAddressModeBorder;
-	allImgsTexture.filterMode = cudaFilterModeLinear;	allImgsTexture.normalized = false;
-	CUDA_SAFE_CALL(cudaBindTextureToArray(allImgsTexture, _allImages_cudaArrayWrapper->_array3D));	// bind to texture	
-	
-	refImgTexture.addressMode[0] = cudaAddressModeBorder; refImgTexture.addressMode[1] = cudaAddressModeBorder; 
-	refImgTexture.addressMode[2] = cudaAddressModeBorder;
-	refImgTexture.filterMode = cudaFilterModeLinear;	refImgTexture.normalized = false;
-	CUDA_SAFE_CALL(cudaBindTextureToArray(refImgTexture, _refImages_cudaArrayWrapper->_array3D));	// bind to
-	
 	// upload H matrix
 	cudaMemcpyToSymbol("transformHH", _transformHH , sizeof(float) * 18 * _numOfTargetImages, 0, cudaMemcpyHostToDevice);
 
@@ -168,11 +150,28 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 	// reference image
 	_refImage = new Array2d_refImg(_refWidth, _refHeight, blockDim_x, blockDim_y, _refImageDataBlock);
 	_refImage->filterImage(halfWindowSize);
-	_refImage = new Array2d_refImg(_refHeight, _refWidth, blockDim_x, blockDim_y);
+	_refImageT = new Array2d_refImg(_refHeight, _refWidth, blockDim_x, blockDim_y);
 	transpose(_refImage->_refImage_sum_I, _refImageT->_refImage_sum_I);
 	transpose(_refImage->_refImage_sum_II, _refImageT->_refImage_sum_II);
 	transpose(_refImage->_refImageData, _refImageT->_refImageData);
 	
+	// ---------- initialize array
+	_allImages_cudaArrayWrapper = new CudaArray_wrapper(_maxWidth, _maxHeight, _numOfTargetImages);
+	_refImages_cudaArrayWrapper = new CudaArray_wrapper(_refWidth, _refHeight, 1);
+
+	// ---------- upload image data to GPU
+	_allImages_cudaArrayWrapper->array3DCopy<unsigned char>(_imageDataBlock, cudaMemcpyHostToDevice);
+	_refImages_cudaArrayWrapper->array3DCopy<unsigned char>(_refImageDataBlock, cudaMemcpyHostToDevice);
+	// attach to texture so that the kernel can access the data
+	allImgsTexture.addressMode[0] = cudaAddressModeBorder; allImgsTexture.addressMode[1] = cudaAddressModeBorder; 
+	allImgsTexture.addressMode[2] = cudaAddressModeBorder;
+	allImgsTexture.filterMode = cudaFilterModeLinear;	allImgsTexture.normalized = false;
+	CUDA_SAFE_CALL(cudaBindTextureToArray(allImgsTexture, _allImages_cudaArrayWrapper->_array3D));	// bind to texture	
+	
+	refImgTexture.addressMode[0] = cudaAddressModeBorder; refImgTexture.addressMode[1] = cudaAddressModeBorder; 
+	refImgTexture.addressMode[2] = cudaAddressModeBorder;
+	refImgTexture.filterMode = cudaFilterModeLinear;	refImgTexture.normalized = false;
+	CUDA_SAFE_CALL(cudaBindTextureToArray(refImgTexture, _refImages_cudaArrayWrapper->_array3D));	// bind to
 }
 
 PatchMatch::~PatchMatch()
@@ -205,10 +204,6 @@ PatchMatch::~PatchMatch()
 
 void PatchMatch::transpose(Array2D_wrapper<float> *input, Array2D_wrapper<float> *output)
 {
-	//transpose2dData(float * input, float *output, int width, int height, int pitchInput, int pitchOutput);
-	//tp.transpose2dData(input_device + i * inputPitch * height/sizeof(float), output_device + i * outputPitch * width/sizeof(float), width, height,inputPitch, outputPitch );
-	//cudaTranspose::transpose2dData( _depthMap->_array2D, _depthMapT->_array2D, _depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_pitchData, _depthMapT->_pitchData);
-	
 	for(int d = 0; d < input->getDepth(); d++)
 	{
 		cudaTranspose::transpose2dData( input->_array2D + d * input->_pitchData/sizeof(float) * input->getHeight(),			// **** here sizeof(float) may be able to be changed to corresponds to the datatype of input->array2d
@@ -216,7 +211,6 @@ void PatchMatch::transpose(Array2D_wrapper<float> *input, Array2D_wrapper<float>
 										input->getWidth(), input->getHeight(), input->_pitchData, output->_pitchData);
 		CudaCheckError();
 	}
-
 }
 
 
@@ -256,7 +250,7 @@ void PatchMatch::run()
 		transposeForward();
 		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
 		isRotated = true;
-		topToDown<<<_gridSize, _blockSize>>>(_refImage->_refImageData->_array2D,  _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D, _refImage->_refImage_sum_I->_pitchData,
+		topToDown<<<_gridSize, _blockSize>>>(_refImageT->_refImageData->_array2D,  _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D, _refImageT->_refImage_sum_I->_pitchData,
 			_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
 			_SPMapT->_array2D, _SPMapT->_pitchData, 
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
@@ -267,7 +261,7 @@ void PatchMatch::run()
 		transposeBackward();
 		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), N, 1);
 		isRotated = false;
-		topToDown<<<_gridSize, _blockSize>>>(_refImageT->_refImageData->_array2D, _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D, _refImageT->_refImage_sum_I->_pitchData,
+		topToDown<<<_gridSize, _blockSize>>>(_refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D, _refImage->_refImage_sum_I->_pitchData,
 			_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
@@ -277,7 +271,7 @@ void PatchMatch::run()
 		transposeForward();
 		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
 		isRotated = true;
-		downToTop<<<_gridSize, _blockSize>>>(_refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D, _refImage->_refImage_sum_I->_pitchData,
+		downToTop<<<_gridSize, _blockSize>>>(_refImageT->_refImageData->_array2D, _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D, _refImageT->_refImage_sum_I->_pitchData,
 			_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
 			_SPMapT->_array2D, _SPMapT->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
@@ -287,7 +281,7 @@ void PatchMatch::run()
 		transposeBackward();
 		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), N, 1);
 		isRotated = false;
-		downToTop<<<_gridSize, _blockSize>>>(_refImageT->_refImageData->_array2D, _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D, _refImageT->_refImage_sum_I->_pitchData,
+		downToTop<<<_gridSize, _blockSize>>>(_refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D, _refImage->_refImage_sum_I->_pitchData,
 			_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
@@ -340,7 +334,7 @@ inline __device__ void doTransform(float *col_prime, float *row_prime, float col
 
 }
 
-inline __device__ float computeNCC(const int &threadId, float *refImg, float *refImg_sum_I, float *refImg_sum_II, const int &imageId, const float &centerRow, const float &centerCol, const float &depth, const int &halfWindowSize, const bool &isRotated, const float& refImgWidth, const float& refImgHeight)
+inline __device__ float computeNCC(const int &threadId, float *refImg_I, float *refImg_sum_I, float *refImg_sum_II, const int &imageId, const float &centerRow, const float &centerCol, const float &depth, const int &halfWindowSize, const bool &isRotated, const float& refImgWidth, const float& refImgHeight)
 	// here the return resutls are 1-NCC, so the range is [0, 2], the smaller value, the better color consistency
 {
 	float col_prime;
@@ -353,8 +347,8 @@ inline __device__ float computeNCC(const int &threadId, float *refImg, float *re
 	float sum_Iprime = 0;
 	
 	//float windowSize = 0;
-	float col;
-	float row;
+	//float col;
+	//float row;
 
 	float *base = &transformHH[0] +  18 * imageId;
 	float transform[9];
@@ -362,45 +356,57 @@ inline __device__ float computeNCC(const int &threadId, float *refImg, float *re
 	for(int i = 0; i<9; i++)
 		transform[i] = base[i] - base[i + 9]/depth;
 
-	//float I;
+	float I;
 	float Iprime;
 
-	for(float i = centerRow - halfWindowSize; i <= centerRow + halfWindowSize; i++) // y
+	int localSharedMemRow = 0;
+	int localSharedMemCol = N - HALFBLOCK + threadId;
+	for(float row = centerRow - halfWindowSize; row <= centerRow + halfWindowSize; row++) // y
 	{
-		row = max( 0.0f, i) + 0.5f;
-		row = min(refImgHeight - 1.0f, i) + 0.5f;
-		for(float j = centerCol - halfWindowSize; j <= centerCol + halfWindowSize; j++) // x
+		//row += 6.0f;
+		//localSharedMemRow += 6.0f;
+		//row = max( 0.0f, i) + 0.5f;
+		//row = min(refImgHeight - 1.0f, i) + 0.5f;
+		for(float col = centerCol - halfWindowSize; col <= centerCol + halfWindowSize; col++) // x
 		{
 			//if( col < 0 || col> refImgWidth - 1.0f || row< 0 || row> refImgHeight - 1.0f) 
 			//	continue;
 			//col = j<0            ? 0 : j;
-			col = max(0.0f, j) + 0.5f;
-			col = min(refImgWidth- 1.0f, j) + 0.5f;
+			//col = max(0.0f, j) + 0.5f;
+			//col = min(refImgWidth- 1.0f, j) + 0.5f;
 
 			// do transform to get the new position
 			if(!isRotated)
-				doTransform(&col_prime, &row_prime, col, row, imageId, transform);
+				doTransform(&col_prime, &row_prime, col + 0.5f, row + 0.5f, imageId, transform);
 			else
-				doTransform(&col_prime, &row_prime, row, col, imageId, transform);
+				doTransform(&col_prime, &row_prime, row + 0.5f, col + 0.5f, imageId, transform);
 			Iprime = tex2DLayered(allImgsTexture, col_prime + 0.5f, row_prime + 0.5f, imageId); // textures are not rotated
-			float Iprime_otherway = refImg[3*N*(N-HALFBLOCK) + (N - HALFBLOCK)];
-			printf("Iprime: %d, Iprime_otherway: %d", Iprime, Iprime_otherway);
+			//float Iprime_otherway = refImg[3*N*(N-HALFBLOCK) + (N - HALFBLOCK)];
+			//printf("Iprime: %d, Iprime_otherway: %d", Iprime, Iprime_otherway);
 
 			sum_Iprime_Iprime += (Iprime * Iprime);
 			sum_Iprime += Iprime;
 
-	//		Iprime = 0.4;
-	//		if(!isRotated)
-	//			I = tex2DLayered( refImgTexture, col, row, 0);
-	//		else
-	//			I = tex2DLayered( refImgTexture, row, col, 0);
+			if(!isRotated)
+				I = tex2DLayered( refImgTexture, col + 0.5f, row + 0.5f, 0);
+			else
+				I = tex2DLayered( refImgTexture, row + 0.5f, col + 0.5f, 0);
+
+			float I_otherway = refImg_I[3*N*localSharedMemRow + localSharedMemCol];
+//			printf("I: %f, I_otherway: %f \n", I, I_otherway);
 
 	//		sum_I_I += (I * I);
 	//		sum_I_Iprime += (Iprime * I);
-	//		sum_I += I;
+			sum_I += I;
 			//++windowSize;
+			++localSharedMemCol;
 		}
+		++localSharedMemRow;
 	}	
+	float sum_I_otherway = refImg_sum_I[threadId];
+
+	printf("I: %f, I_otherway: %f \n", sum_I, sum_I_otherway);
+
 
 	float windowSize = halfWindowSize * 2.0f + 1.0f;
 	windowSize *= windowSize;
@@ -441,22 +447,42 @@ inline __device__ int findMinCost(float *cost)
 //	}
 //}
 
-inline __device__ void readImageIntoSharedMemory(float *refImg_I, int row, int col, const int& threadId) 
+inline __device__ void readImageIntoSharedMemory(float *refImg_I, int row, int col, const int& threadId, bool isRotated) 
 	// here assumes N is bigger than HALFBLOCK
 {
 	// the size of the data block: 3N * (2 * halfblock + 1)
-	row -= HALFBLOCK;
-	col -= N;
-	for(int i = 0; i < HALFBLOCK * 2 + 1; i++)
+	if(!isRotated)
 	{
-		
-		refImg_I[threadId + i * 3 * N] = tex2DLayered( refImgTexture, col + 0.5f, row + 0.5f, 0);
-		col += N; 
-		refImg_I[threadId + i * 3 * N + N] = tex2DLayered( refImgTexture, col + 0.5f, row + 0.5f, 0);
-		col += N;
-		refImg_I[threadId + i * 3 * N + 2 * N] = tex2DLayered( refImgTexture, col + 0.5f, row + 0.5f , 0);
-		col += N;
-		++row; // increase one row
+		row -= HALFBLOCK;
+		col -= N;
+		for(int i = 0; i < HALFBLOCK * 2 + 1; i++)
+		{
+
+			refImg_I[threadId + i * 3 * N] = tex2DLayered( refImgTexture, col + 0.5f, row + 0.5f, 0);
+			col += N; 
+			refImg_I[threadId + i * 3 * N + N] = tex2DLayered( refImgTexture, col + 0.5f, row + 0.5f, 0);
+			col += N;
+			refImg_I[threadId + i * 3 * N + 2 * N] = tex2DLayered( refImgTexture, col + 0.5f, row + 0.5f , 0);
+			col -= 2 * N; // go back to the 1st col
+			++row; // increase one row
+		}
+	}
+	else
+	{
+		row -= HALFBLOCK;
+		col -= N;
+		for(int i = 0; i < HALFBLOCK * 2 + 1; i++)
+		{
+
+			refImg_I[threadId + i * 3 * N] = tex2DLayered( refImgTexture, row + 0.5f, col + 0.5f, 0);
+			col += N; 
+			refImg_I[threadId + i * 3 * N + N] = tex2DLayered( refImgTexture, row + 0.5f, col + 0.5f, 0);
+			col += N;
+			refImg_I[threadId + i * 3 * N + 2 * N] = tex2DLayered( refImgTexture, row + 0.5f, col + 0.5f , 0);
+			col -= 2 * N; // go back to the 1st col
+			++row; // increase one row
+		}
+
 	}
 
 }
@@ -496,7 +522,7 @@ __global__ void topToDown(float *refImg, float *refImgI, float *refImgII, int re
 		{
 			refImg_sum_I[threadId] = accessPitchMemory(refImgI, refImgPitch, row, col);
 			refImg_sum_II[threadId] = accessPitchMemory(refImgII, refImgPitch, row, col);
-			readImageIntoSharedMemory( refImg_I, row, col, threadId);
+			readImageIntoSharedMemory( refImg_I, row, col, threadId, isRotated);
 			//refImg_I[threadId] = accessPitchMemory(refImg, refImgPitch, row, col);
 
 			depth_current_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col); 
@@ -649,7 +675,7 @@ __global__ void downToTop(float *refImg, float *refImgI, float *refImgII, int re
 			refImg_sum_I[threadId] = accessPitchMemory(refImgI, refImgPitch, row, col);
 			refImg_sum_II[threadId] = accessPitchMemory(refImgII, refImgPitch, row, col);
 			//refImg_I[threadId] = accessPitchMemory(refImg, refImgPitch, row, col);
-			readImageIntoSharedMemory( refImg_I, row, col, threadId);
+			readImageIntoSharedMemory( refImg_I, row, col, threadId, isRotated);
 
 			depth_current_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col); 
 			for(int i = 0; i<s; i++)

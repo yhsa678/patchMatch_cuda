@@ -18,7 +18,10 @@ public:
 	
 
 	template<typename T>  
-		void array3DCopy(unsigned char *img,  enum cudaMemcpyKind kind);			
+		void array3DCopy(unsigned char *img,  enum cudaMemcpyKind kind);		
+
+	void array3DCopy_float(float *data, enum cudaMemcpyKind kind, int dataPitch);
+	
 };
 
 template<typename T> void CudaArray_wrapper::array3DCopy(unsigned char *img,  enum cudaMemcpyKind kind)	// It must be one of cudaMemcpyHostToHost, cudaMemcpyHostToDevice, cudaMemcpyDeviceToHost, or cudaMemcpyDeviceToDevice
@@ -53,6 +56,9 @@ template<typename T> void CudaArray_wrapper::array3DCopy(unsigned char *img,  en
 		params.srcArray = _array3D;
 		CUDA_SAFE_CALL(cudaMemcpy3D(&params));
 	}
+	
 }
+
+
 
 #endif

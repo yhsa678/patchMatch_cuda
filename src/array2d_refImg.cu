@@ -5,8 +5,11 @@
 #define THREADS_NUMBER_V 12
 
 texture<unsigned char, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> tex32F0;
+
+texture<float, cudaTextureType2DLayered, cuda
+
 //template<int FR>
-__global__ void sumI_II_RowsKernel( float *output_I, float *output_sum_I, float *output_sum_II, int imageW, int imageH, int FR ) 
+__global__ void sumI_II_RowsKernel( float *output_I, float *output_sum_I, float *output_sum_II, int imageW, int imageH, int FR, int dataPitch ) 
 {
 	const int ix = blockDim.x * blockIdx.x + threadIdx.x;
 	const int iy = blockDim.y * blockIdx.y + threadIdx.y;
@@ -20,7 +23,8 @@ __global__ void sumI_II_RowsKernel( float *output_I, float *output_sum_I, float 
 
 	float texValue;
 	for(int k = -FR; k <= FR; k++)
-	{ 		texValue = tex2DLayered(tex32F0, x + (float)k, y, 0); 
+	{ 
+		texValue = tex2DLayered(tex32F0, x + (float)k, y, 0); 
 		//texValue = tex2D(tex32F0, x + (float)k, y);
 		sum_I += texValue;
 		sum_II += (texValue * texValue);
@@ -28,7 +32,7 @@ __global__ void sumI_II_RowsKernel( float *output_I, float *output_sum_I, float 
 	}
 
 	//d_Dst[ IMAD(iy, imageW, ix) ] = sum;
-	int outputAddr = iy * imageW + ix;
+	int outputAddr = iy * dataPitch/sizeof(float) + ix;
 	output_sum_I[outputAddr] = sum_I;
 	output_sum_II[outputAddr] = sum_II;
 
@@ -39,7 +43,7 @@ __global__ void sumI_II_RowsKernel( float *output_I, float *output_sum_I, float 
 // Kernel Column convolution filter
 ////////////////////////////////////////////////////////////////////////////////
 template<int FR> 
-__global__ void sumI_II_ColsKernel( float *output, int imageW, int imageH )
+__global__ void sumI_II_ColsKernel( float *output, int imageW, int imageH, int dataPitch )
 {
 	const int ix = blockDim.x * blockIdx.x + threadIdx.x;
 	const int iy = blockDim.y * blockIdx.y + threadIdx.y;
@@ -57,16 +61,11 @@ __global__ void sumI_II_ColsKernel( float *output, int imageW, int imageH )
 		sum += texValue;
 		//sum += vtex2D(tex32F0, x, y + (float)k) * g_Kernel[FR - k];
 	}
-	int outputAddr = iy * imageW + ix;
+	int outputAddr = iy * dataPitch/sizeof(float) + ix;
 	output[outputAddr] = sum;
 	//d_Dst[IMAD(iy, imageW, ix)] = sum;
 }
 
-
-void Array2d_refImg::init(unsigned char *img)
-{
-	_tempArray->array3DCopy<unsigned char>( img, cudaMemcpyHostToDevice);
-}
 
 void Array2d_refImg::filterImage(int halfWindowSize)
 {
@@ -106,25 +105,26 @@ void Array2d_refImg::filterImage()
 	dim3 blocks( (_refWidth - 1)/threads.x + 1, (_refHeight - 1)/threads.y + 1);
 	
 	//horizontal pass:
-		tex32F0.addressMode[0] = cudaAddressModeBorder; tex32F0.addressMode[1] = cudaAddressModeBorder; tex32F0.addressMode[2] = cudaAddressModeBorder;
-	tex32F0.filterMode = cudaFilterModePoint; tex32F0.normalized = false;
+	
+	tex32F0.addressMode[0] = cudaAddressModeBorder; tex32F0.addressMode[1] = cudaAddressModeBorder; tex32F0.addressMode[2] = cudaAddressModeBorder;
+	tex32F0.filterMode = cudaFilterModeLinear; tex32F0.normalized = false;
 
 	CUDA_SAFE_CALL(cudaBindTextureToArray(tex32F0, _tempArray->_array3D));
-	sumI_II_RowsKernel<<<blocks, threads>>>(_refImageData->_array2D, _refImage_sum_I->_array2D, _refImage_sum_II->_array2D, _refWidth, _refHeight, FR);
-//sumI_II_RowsKernel<FR><<<blocks, threads>>>(_refImage_sum_I->_array2D, _refImage_sum_II->_array2D, _refWidth, _refHeight);
+	sumI_II_RowsKernel<<<blocks, threads>>>(_refImageData->_array2D, _refImage_sum_I->_array2D, _refImage_sum_II->_array2D, _refWidth, _refHeight, FR, _refImage_sum_I->_pitchData);
 	CudaCheckError();
 	CUDA_SAFE_CALL(cudaUnbindTexture(tex32F0));
 
-	//
-	CUDA_SAFE_CALL(cudaMemcpy2DToArray( _tempArray->_array3D, 0, 0, _refImage_sum_I->_array2D, _refImage_sum_I->_pitchData, _refWidth*sizeof(float), _refHeight, cudaMemcpyDeviceToDevice));
+	//CUDA_SAFE_CALL(cudaMemcpy2DToArray( _tempArray->_array3D, 0, 0, _refImage_sum_I->_array2D, _refImage_sum_I->_pitchData, _refWidth*sizeof(float), _refHeight, cudaMemcpyDeviceToDevice));
+	_tempArray->array3DCopy_float( _refImage_sum_I->_array2D, cudaMemcpyDeviceToDevice, _refImage_sum_I->_pitchData);
 	CUDA_SAFE_CALL(cudaBindTextureToArray(tex32F0, _tempArray->_array3D));
-	sumI_II_ColsKernel<FR><<<blocks, threads>>>(_refImage_sum_I->_array2D, _refWidth, _refHeight);
+	sumI_II_ColsKernel<FR><<<blocks, threads>>>(_refImage_sum_I->_array2D, _refWidth, _refHeight, _refImage_sum_I->_pitchData);
 	CUDA_SAFE_CALL(cudaUnbindTexture(tex32F0));
 
 
-	CUDA_SAFE_CALL(cudaMemcpy2DToArray( _tempArray->_array3D, 0, 0, _refImage_sum_II->_array2D, _refImage_sum_II->_pitchData, _refWidth*sizeof(float), _refHeight, cudaMemcpyDeviceToDevice));
+	//CUDA_SAFE_CALL(cudaMemcpy2DToArray( _tempArray->_array3D, 0, 0, _refImage_sum_II->_array2D, _refImage_sum_II->_pitchData, _refWidth*sizeof(float), _refHeight, cudaMemcpyDeviceToDevice));
+	_tempArray->array3DCopy_float( _refImage_sum_II->_array2D, cudaMemcpyDeviceToDevice, _refImage_sum_II->_pitchData);
 	CUDA_SAFE_CALL(cudaBindTextureToArray(tex32F0, _tempArray->_array3D));
-	sumI_II_ColsKernel<FR><<<blocks, threads>>>(_refImage_sum_II->_array2D, _refWidth, _refHeight);
+	sumI_II_ColsKernel<FR><<<blocks, threads>>>(_refImage_sum_II->_array2D, _refWidth, _refHeight, _refImage_sum_II->_pitchData);
 	CUDA_SAFE_CALL(cudaUnbindTexture(tex32F0));
 
 }
