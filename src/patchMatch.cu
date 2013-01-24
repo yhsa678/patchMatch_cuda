@@ -241,12 +241,12 @@ void PatchMatch::run()
 	// left to right sweep
 //-----------------------------------------------------------
 		std::cout<< "Iteration " << i << " starts" << std::endl;
-		t.startRecord();
+		
 		if(i == 0)
 			numOfSamples = 1; // ****
 		else
 			numOfSamples = _numOfSamples;
-		
+				t.startRecord();
 		transposeForward();
 		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
 		isRotated = true;
@@ -256,6 +256,7 @@ void PatchMatch::run()
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
 		CudaCheckError();
 		gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
+		t.stopRecord();
 ////-----------------------------------------------------------
 //	// top to bottom sweep 
 		transposeBackward();
@@ -287,7 +288,6 @@ void PatchMatch::run()
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
 		gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
-		t.stopRecord();
 	}
 
 	_depthMap->saveToFile("depthMap.txt");
@@ -323,42 +323,44 @@ inline __device__ float drawRandNum(curandState *state, int statePitch, int col,
 #define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
 #define SET_BIT(var,pos)( (var) |= (1 << (pos) ))
 
-inline __device__ void doTransform(float *col_prime, float *row_prime, float col, float row, int imageId, float *transform)
+inline __device__ void doTransform(float &col_prime, float &row_prime, float col, float row, int imageId, float *transform)
 {
 	//float *base = &transformHH[0] +  18 * imageId;
 	//float z = (base[6] - base[15]/depth) * col + (base[7] - base[16]/depth) * row + (base[8] - base[17]/depth);
 	//*col_prime = ((base[0] - base[9]/depth) * col + (base[1] - base[10]/depth) * row + (base[2] - base[11]/depth))/z;
 	//*row_prime = ((base[3] - base[12]/depth) * col + (base[4] - base[13]/depth) * row + (base[5] - base[14]/depth))/z;
 	float z = transform[6] * col + transform[7] * row + transform[8];
-	*col_prime = (transform[0] * col + transform[1] * row + transform[2])/z;
-	*row_prime = (transform[3] * col + transform[4] * row + transform[5])/z;
-
+	col_prime = (transform[0] * col + transform[1] * row + transform[2])/z;
+	row_prime = (transform[3] * col + transform[4] * row + transform[5])/z;
 }
 
-inline __device__ float computeNCC(const int &threadId, float *refImg_I, float *refImg_sum_I, float *refImg_sum_II, const int &imageId, const float &centerRow, const float &centerCol, const float &depth, const int &halfWindowSize, const bool &isRotated, const float& refImgWidth, const float& refImgHeight)
+inline __device__ float computeNCC(const int &threadId, const float *refImg_I, const float *refImg_sum_I, const float *refImg_sum_II, const int &imageId, const float &centerRow, const float &centerCol, const float &depth, const int &halfWindowSize, const bool &isRotated, const float& refImgWidth, const float& refImgHeight)
 	// here the return resutls are 1-NCC, so the range is [0, 2], the smaller value, the better color consistency
 {
 	float col_prime;
 	float row_prime;
-
-//	float sum_I_I = 0;
 	float sum_I_Iprime = 0;
 	float sum_Iprime_Iprime = 0;
-//	float sum_I = 0;
 	float sum_Iprime = 0;
-	
-	//float windowSize = 0;
-	//float col;
-	//float row;
 
-	float *base = &transformHH[0] +  18 * imageId;
-	float transform[9];
-#pragma unroll
+	float transform[9]; 
 	for(int i = 0; i<9; i++)
-		transform[i] = base[i] - base[i + 9]/depth;
+		transform[i] = (transformHH + 18 * imageId)[i] - (transformHH + 18 * imageId)[i+9]/depth;
+	float z;
+	if(!isRotated)
+	{
+		z =         transform[6] * (centerCol - halfWindowSize + 0.5) + transform[7] * (centerRow - halfWindowSize + 0.5) + transform[8];
+		col_prime = transform[0] * (centerCol - halfWindowSize + 0.5) + transform[1] * (centerRow - halfWindowSize + 0.5) + transform[2];
+		row_prime = transform[3] * (centerCol - halfWindowSize + 0.5) + transform[4] * (centerRow - halfWindowSize + 0.5) + transform[5];
+	}
+	else
+	{
+		z =         transform[6] * (centerRow - halfWindowSize + 0.5) + transform[7] * (centerCol - halfWindowSize + 0.5) + transform[8];
+		col_prime = transform[0] * (centerRow - halfWindowSize + 0.5) + transform[1] * (centerCol - halfWindowSize + 0.5) + transform[2];
+		row_prime = transform[3] * (centerRow - halfWindowSize + 0.5) + transform[4] * (centerCol - halfWindowSize + 0.5) + transform[5];
+	}
 
 	float Iprime;
-
 	int localSharedMemRow = 0;
 	int localSharedMemCol ;
 	for(float row = centerRow - halfWindowSize; row <= centerRow + halfWindowSize; row++) // y
@@ -368,6 +370,8 @@ inline __device__ float computeNCC(const int &threadId, float *refImg_I, float *
 		//row = max( 0.0f, i) + 0.5f;
 		//row = min(refImgHeight - 1.0f, i) + 0.5f;
 		localSharedMemCol = N - HALFBLOCK + threadId;
+
+
 		for(float col = centerCol - halfWindowSize; col <= centerCol + halfWindowSize; col++) // x
 		{
 			//if( col < 0 || col> refImgWidth - 1.0f || row< 0 || row> refImgHeight - 1.0f) 
@@ -378,48 +382,26 @@ inline __device__ float computeNCC(const int &threadId, float *refImg_I, float *
 
 			// do transform to get the new position
 			if(!isRotated)
-				doTransform(&col_prime, &row_prime, col + 0.5f, row + 0.5f, imageId, transform);
+				doTransform(col_prime, row_prime, col + 0.5f, row + 0.5f, imageId, transform);
 			else
-				doTransform(&col_prime, &row_prime, row + 0.5f, col + 0.5f, imageId, transform);
+				doTransform(col_prime, row_prime, row + 0.5f, col + 0.5f, imageId, transform);
 			Iprime = tex2DLayered(allImgsTexture, col_prime + 0.5f, row_prime + 0.5f, imageId); // textures are not rotated
-			//float Iprime_otherway = refImg[3*N*(N-HALFBLOCK) + (N - HALFBLOCK)];
-			//printf("Iprime: %d, Iprime_otherway: %d", Iprime, Iprime_otherway);
 
 			sum_Iprime_Iprime += (Iprime * Iprime);
 			sum_Iprime += Iprime;
-
-			//if(!isRotated)
-			//	I = tex2DLayered( refImgTexture, col + 0.5f, row + 0.5f, 0);
-			//else
-			//	I = tex2DLayered( refImgTexture, row + 0.5f, col + 0.5f, 0);
-			
-			//float I_otherway = refImg_I[3*N*localSharedMemRow + localSharedMemCol];
-
-			//if(abs(I - I_otherway) > 0.01)
-			//	printf("I: %f, I_otherway: %f \n", I, I_otherway);
-			//I = refImg_I[3*N*localSharedMemRow + localSharedMemCol];
-
-			//sum_I_I += (I* I);
 			sum_I_Iprime += (Iprime * refImg_I[3*N*localSharedMemRow + localSharedMemCol]);
-			//sum_I += I;
-			//++windowSize;
 			++localSharedMemCol;
 		}
 		++localSharedMemRow;
 	}	
-//	sum_I_I = refImg_sum_II[threadId];
-//	sum_I = refImg_sum_I[threadId];
-
-	float windowSize = halfWindowSize * 2.0f + 1.0f;
-	windowSize *= windowSize;
-	float cost = ((refImg_sum_II[threadId] - refImg_sum_I[threadId] * refImg_sum_I[threadId]/windowSize) * (sum_Iprime_Iprime - sum_Iprime * sum_Iprime/windowSize )); 
+	float cost = ((refImg_sum_II[threadId] - refImg_sum_I[threadId] * refImg_sum_I[threadId]/(((float)halfWindowSize * 2.0f + 1.0f) * ((float)halfWindowSize * 2.0f + 1.0f)) ) 
+		* (sum_Iprime_Iprime - sum_Iprime * sum_Iprime/(((float)halfWindowSize * 2.0f + 1.0f)*((float)halfWindowSize * 2.0f + 1.0f)))); 
 	cost = cost <=0? 0 : sqrt(cost);
 	if(cost == 0)
 		return 2; // very small color consistency
 	else
 	{
-		//return 1 - (sum_I_Iprime -  sum_I * sum_Iprime/windowSize )/(cost);
-		return 1 - (sum_I_Iprime -  refImg_sum_I[threadId] * sum_Iprime/windowSize )/(cost);
+		return 1 - (sum_I_Iprime -  refImg_sum_I[threadId] * sum_Iprime/((halfWindowSize * 2 + 1)*(halfWindowSize * 2 + 1)) )/(cost);
 	}
 }
 
