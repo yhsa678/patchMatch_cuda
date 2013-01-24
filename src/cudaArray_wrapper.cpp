@@ -14,6 +14,14 @@ void CudaArray_wrapper::array3DCopy_float(float *data, enum cudaMemcpyKind kind,
 {
 	if(kind == cudaMemcpyDeviceToDevice)
 	{
+		if(_array3D == NULL)
+		{
+			struct cudaExtent extent = make_cudaExtent(_width, _height, _depth);	
+			cudaChannelFormatDesc fmt = cudaCreateChannelDesc<float>();				
+			CUDA_SAFE_CALL(cudaMalloc3DArray(&_array3D,&fmt,extent, cudaArrayLayered));	
+		}	
+
+
 		struct cudaMemcpy3DParms params = {0};
 		params.extent = make_cudaExtent(_width, _height, _depth);
 		params.kind = kind;
