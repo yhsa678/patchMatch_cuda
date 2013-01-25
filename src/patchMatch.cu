@@ -112,7 +112,6 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 			offset += 9;
 		}
 	}
-
 } 
 
 PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId, int numOfSamples): 
@@ -246,7 +245,8 @@ void PatchMatch::run()
 			numOfSamples = 1; // ****
 		else
 			numOfSamples = _numOfSamples;
-				t.startRecord();
+		
+		t.startRecord();
 		transposeForward();
 		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
 		isRotated = true;
@@ -256,7 +256,7 @@ void PatchMatch::run()
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
 		CudaCheckError();
 		gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
-		t.stopRecord();
+		
 ////-----------------------------------------------------------
 //	// top to bottom sweep 
 		transposeBackward();
@@ -288,6 +288,7 @@ void PatchMatch::run()
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated);
 		gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
+		t.stopRecord();
 	}
 
 	_depthMap->saveToFile("depthMap.txt");
@@ -323,16 +324,16 @@ inline __device__ float drawRandNum(curandState *state, int statePitch, int col,
 #define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
 #define SET_BIT(var,pos)( (var) |= (1 << (pos) ))
 
-inline __device__ void doTransform(float &col_prime, float &row_prime, float col, float row, int imageId, float *transform)
-{
-	//float *base = &transformHH[0] +  18 * imageId;
-	//float z = (base[6] - base[15]/depth) * col + (base[7] - base[16]/depth) * row + (base[8] - base[17]/depth);
-	//*col_prime = ((base[0] - base[9]/depth) * col + (base[1] - base[10]/depth) * row + (base[2] - base[11]/depth))/z;
-	//*row_prime = ((base[3] - base[12]/depth) * col + (base[4] - base[13]/depth) * row + (base[5] - base[14]/depth))/z;
-	float z = transform[6] * col + transform[7] * row + transform[8];
-	col_prime = (transform[0] * col + transform[1] * row + transform[2])/z;
-	row_prime = (transform[3] * col + transform[4] * row + transform[5])/z;
-}
+//inline __device__ void doTransform(float &col_prime, float &row_prime, float col, float row, int imageId, float *transform)
+//{
+//	//float *base = &transformHH[0] +  18 * imageId;
+//	//float z = (base[6] - base[15]/depth) * col + (base[7] - base[16]/depth) * row + (base[8] - base[17]/depth);
+//	//*col_prime = ((base[0] - base[9]/depth) * col + (base[1] - base[10]/depth) * row + (base[2] - base[11]/depth))/z;
+//	//*row_prime = ((base[3] - base[12]/depth) * col + (base[4] - base[13]/depth) * row + (base[5] - base[14]/depth))/z;
+//	float z = transform[6] * col + transform[7] * row + transform[8];
+//	col_prime = (transform[0] * col + transform[1] * row + transform[2])/z;
+//	row_prime = (transform[3] * col + transform[4] * row + transform[5])/z;
+//}
 
 inline __device__ float computeNCC(const int &threadId, const float *refImg_I, const float *refImg_sum_I, const float *refImg_sum_II, const int &imageId, const float &centerRow, const float &centerCol, const float &depth, const int &halfWindowSize, const bool &isRotated, const float& refImgWidth, const float& refImgHeight)
 	// here the return resutls are 1-NCC, so the range is [0, 2], the smaller value, the better color consistency
@@ -346,53 +347,93 @@ inline __device__ float computeNCC(const int &threadId, const float *refImg_I, c
 	float transform[9]; 
 	for(int i = 0; i<9; i++)
 		transform[i] = (transformHH + 18 * imageId)[i] - (transformHH + 18 * imageId)[i+9]/depth;
+
 	float z;
+	float base_col_prime;
+	float base_row_prime;
+	float base_z;
 	if(!isRotated)
 	{
-		z =         transform[6] * (centerCol - halfWindowSize + 0.5) + transform[7] * (centerRow - halfWindowSize + 0.5) + transform[8];
-		col_prime = transform[0] * (centerCol - halfWindowSize + 0.5) + transform[1] * (centerRow - halfWindowSize + 0.5) + transform[2];
-		row_prime = transform[3] * (centerCol - halfWindowSize + 0.5) + transform[4] * (centerRow - halfWindowSize + 0.5) + transform[5];
+		z = base_z =         transform[6] * (centerCol - halfWindowSize + 0.5) + transform[7] * (centerRow - halfWindowSize + 0.5) + transform[8];
+		col_prime = base_col_prime = transform[0] * (centerCol - halfWindowSize + 0.5) + transform[1] * (centerRow - halfWindowSize + 0.5) + transform[2];
+		row_prime = base_row_prime = transform[3] * (centerCol - halfWindowSize + 0.5) + transform[4] * (centerRow - halfWindowSize + 0.5) + transform[5];
 	}
 	else
 	{
-		z =         transform[6] * (centerRow - halfWindowSize + 0.5) + transform[7] * (centerCol - halfWindowSize + 0.5) + transform[8];
-		col_prime = transform[0] * (centerRow - halfWindowSize + 0.5) + transform[1] * (centerCol - halfWindowSize + 0.5) + transform[2];
-		row_prime = transform[3] * (centerRow - halfWindowSize + 0.5) + transform[4] * (centerCol - halfWindowSize + 0.5) + transform[5];
+		z = base_z =         transform[6] * (centerRow - halfWindowSize + 0.5) + transform[7] * (centerCol - halfWindowSize + 0.5) + transform[8];
+		col_prime = base_col_prime = transform[0] * (centerRow - halfWindowSize + 0.5) + transform[1] * (centerCol - halfWindowSize + 0.5) + transform[2];
+		row_prime = base_row_prime = transform[3] * (centerRow - halfWindowSize + 0.5) + transform[4] * (centerCol - halfWindowSize + 0.5) + transform[5];
 	}
 
+
 	float Iprime;
-	int localSharedMemRow = 0;
-	int localSharedMemCol ;
-	for(float row = centerRow - halfWindowSize; row <= centerRow + halfWindowSize; row++) // y
+	//int localSharedMemRow = 0;
+	//int localSharedMemCol ;
+	//for(float row = centerRow - halfWindowSize; row <= centerRow + halfWindowSize; row++) // y
+	for(int localSharedMemRow = 0; localSharedMemRow < 2 * halfWindowSize + 1; localSharedMemRow ++)
 	{
 		//row += 6.0f;
 		//localSharedMemRow += 6.0f;
 		//row = max( 0.0f, i) + 0.5f;
 		//row = min(refImgHeight - 1.0f, i) + 0.5f;
-		localSharedMemCol = N - HALFBLOCK + threadId;
+		//localSharedMemCol = N - HALFBLOCK + threadId;		
+		
 
 
-		for(float col = centerCol - halfWindowSize; col <= centerCol + halfWindowSize; col++) // x
+		//for(float col = centerCol - halfWindowSize; col <= centerCol + halfWindowSize; col++) // x
+		for(int localSharedMemCol = 0; localSharedMemCol < 2 * halfWindowSize + 1; localSharedMemCol++)
 		{
-			//if( col < 0 || col> refImgWidth - 1.0f || row< 0 || row> refImgHeight - 1.0f) 
-			//	continue;
-			//col = j<0            ? 0 : j;
-			//col = max(0.0f, j) + 0.5f;
-			//col = min(refImgWidth- 1.0f, j) + 0.5f;
-
 			// do transform to get the new position
-			if(!isRotated)
-				doTransform(col_prime, row_prime, col + 0.5f, row + 0.5f, imageId, transform);
-			else
-				doTransform(col_prime, row_prime, row + 0.5f, col + 0.5f, imageId, transform);
-			Iprime = tex2DLayered(allImgsTexture, col_prime + 0.5f, row_prime + 0.5f, imageId); // textures are not rotated
+			Iprime = tex2DLayered(allImgsTexture, col_prime/z + 0.5f, row_prime/z + 0.5f, imageId); // textures are not rotated
 
 			sum_Iprime_Iprime += (Iprime * Iprime);
 			sum_Iprime += Iprime;
-			sum_I_Iprime += (Iprime * refImg_I[3*N*localSharedMemRow + localSharedMemCol]);
-			++localSharedMemCol;
+			sum_I_Iprime += (Iprime * refImg_I[3*N*localSharedMemRow + localSharedMemCol + N - HALFBLOCK + threadId]);
+			//sum_I_Iprime += (Iprime * refImg_I[3*N*localSharedMemRow + localSharedMemCol]);
+			//++localSharedMemCol;
+			if(!isRotated)
+			{
+				//doTransform(col_prime, row_prime, col + 0.5f, row + 0.5f, imageId, transform);
+				//doTransform(col_prime, row_prime, (float)localSharedMemCol + centerCol - halfWindowSize + 0.5f, (float)localSharedMemRow + centerRow - halfWindowSize + 0.5f, imageId, transform);
+				z += transform[6];
+				col_prime += transform[0];
+				row_prime += transform[3];
+			}
+			else
+			{
+				z += transform[7];
+				col_prime += transform[1];
+				row_prime += transform[4];
+				//doTransform(col_prime, row_prime, row + 0.5f, col + 0.5f, imageId, transform); 
+				//doTransform(col_prime, row_prime, (float)localSharedMemRow + centerRow - halfWindowSize + 0.5f, (float)localSharedMemCol + centerCol - halfWindowSize + 0.5f, imageId, transform);
+			}
 		}
-		++localSharedMemRow;
+		//++localSharedMemRow;
+		if(!isRotated) 
+		{
+			//z =         transform[6] * (centerCol - halfWindowSize + 0.5) + transform[7] * (centerRow - halfWindowSize + 0.5 + localSharedMemRow) + transform[8];
+			//col_prime = transform[0] * (centerCol - halfWindowSize + 0.5) + transform[1] * (centerRow - halfWindowSize + 0.5 + localSharedMemRow) + transform[2]; 
+		    //row_prime = transform[3] * (centerCol - halfWindowSize + 0.5) + transform[4] * (centerRow - halfWindowSize + 0.5 + localSharedMemRow) + transform[5]; 
+			/*z = (base_z + transform[7] * localSharedMemRow);
+			col_prime = (base_col_prime + transform[1] * localSharedMemRow); 
+			row_prime = (base_row_prime + transform[4] * localSharedMemRow);*/
+			z = (base_z += transform[7] );
+			col_prime = (base_col_prime += transform[1]); 
+			row_prime = (base_row_prime += transform[4]);
+		}
+		else
+		{
+			//z =         transform[6] * (centerRow - halfWindowSize + 0.5+ localSharedMemRow) + transform[7] * (centerCol - halfWindowSize + 0.5 ) + transform[8];
+			//col_prime = transform[0] * (centerRow - halfWindowSize + 0.5+ localSharedMemRow) + transform[1] * (centerCol - halfWindowSize + 0.5 ) + transform[2];
+			//row_prime = transform[3] * (centerRow - halfWindowSize + 0.5+ localSharedMemRow) + transform[4] * (centerCol - halfWindowSize + 0.5 ) + transform[5];
+			/*z = (base_z + transform[6] * localSharedMemRow);
+			col_prime = (base_col_prime + transform[0] * localSharedMemRow); 
+			row_prime = (base_row_prime + transform[3] * localSharedMemRow);*/
+			z = (base_z += transform[6] );
+			col_prime = (base_col_prime += transform[0] ); 
+			row_prime = (base_row_prime += transform[3] );
+		}
+		
 	}	
 	float cost = ((refImg_sum_II[threadId] - refImg_sum_I[threadId] * refImg_sum_I[threadId]/(((float)halfWindowSize * 2.0f + 1.0f) * ((float)halfWindowSize * 2.0f + 1.0f)) ) 
 		* (sum_Iprime_Iprime - sum_Iprime * sum_Iprime/(((float)halfWindowSize * 2.0f + 1.0f)*((float)halfWindowSize * 2.0f + 1.0f)))); 
@@ -605,17 +646,18 @@ __global__ void topToDown(float *refImg, float *refImgI, float *refImgII, int re
 			}
 			// Here I need to calculate SPMap based on the best depth, and put it into SPMap
 
-			float variance_inv = 1.0/(0.2 * 0.2);
+			//float variance_inv = 1.0/(0.2 * 0.2);
 			//if(idx != 1 || numOfSamples == 1)
 			for(int imageId = 0; imageId < TARGETIMGS; imageId++)
 			{
 				cost[0] = computeNCC(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, (float)row, (float)col, bestDepth, halfWindowSize, isRotated, (float)refImageWidth, (float)refImageHeight);
-				cost[0] = exp(-0.5 * cost[0] * cost[0] * variance_inv);
+				cost[0] = exp(-0.5 * cost[0] * cost[0] / (0.2 * 0.2));
 				//normalizedSPMap_former[imageId * N + threadId] = cost[0];
 				writePitchMemory(SPMap, SPMapPitch, (float)row + imageId * refImageHeight, (float)col, cost[0]); // write SPMap
 			}
 			// write depth
 			writePitchMemory(depthMap, depthMapPitch, (float)row, (float)col, bestDepth);
+
 			// swap depth former and depth current
 			depth_former_array[threadId] = bestDepth;
 		}
@@ -751,12 +793,12 @@ __global__ void downToTop(float *refImg, float *refImgI, float *refImgII, int re
 			}
 			// Here I need to calculate SPMap based on the best depth, and put it into SPMap
 
-			float variance_inv = 1.0/(0.2 * 0.2);
+			//float variance_inv = 1.0/(0.2 * 0.2);
 			//if(idx != 1 || numOfSamples == 1)
 				for(int imageId = 0; imageId < TARGETIMGS; imageId++)
 				{
 					cost[0] = computeNCC(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, (float)row, (float)col, bestDepth, halfWindowSize, isRotated, (float)refImageWidth, (float)refImageHeight);
-					cost[0] = exp(-0.5 * cost[0] * cost[0] * variance_inv);
+					cost[0] = exp(-0.5 * cost[0] * cost[0] /(0.2*0.2));
 					//normalizedSPMap_former[imageId * N + threadId] = cost[0];
 					writePitchMemory(SPMap, SPMapPitch, (float)row + imageId * refImageHeight, (float)col, cost[0]);
 				}
