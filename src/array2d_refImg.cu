@@ -8,8 +8,8 @@ texture<unsigned char, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> te
 
 texture<float, cudaTextureType2DLayered, cudaReadModeElementType> tex32F0_float; 
 
-//template<int FR>
-__global__ void sumI_II_RowsKernel( float *output_I, float *output_sum_I, float *output_sum_II, int imageW, int imageH, int FR, int dataPitch ) 
+template<int FR>
+__global__ void sumI_II_RowsKernel( float *output_I, float *output_sum_I, float *output_sum_II, int imageW, int imageH,  int dataPitch ) 
 {
 	const int ix = blockDim.x * blockIdx.x + threadIdx.x;
 	const int iy = blockDim.y * blockIdx.y + threadIdx.y;
@@ -42,8 +42,8 @@ __global__ void sumI_II_RowsKernel( float *output_I, float *output_sum_I, float 
 ////////////////////////////////////////////////////////////////////////////////
 // Kernel Column convolution filter
 ////////////////////////////////////////////////////////////////////////////////
-//template<int FR> 
-__global__ void sumI_II_ColsKernel( float *output, int imageW, int imageH, int dataPitch, int FR )
+template<int FR> 
+__global__ void sumI_II_ColsKernel( float *output, int imageW, int imageH, int dataPitch)
 {
 	const int ix = blockDim.x * blockIdx.x + threadIdx.x;
 	const int iy = blockDim.y * blockIdx.y + threadIdx.y;
@@ -113,19 +113,19 @@ void Array2d_refImg::filterImage()
 	tex32F0_float.filterMode = cudaFilterModeLinear; tex32F0_float.normalized = false;
 
 	CUDA_SAFE_CALL(cudaBindTextureToArray(tex32F0, _tempArray->_array3D));
-	sumI_II_RowsKernel<<<blocks, threads>>>(_refImageData->_array2D, _refImage_sum_I->_array2D, _refImage_sum_II->_array2D, _refWidth, _refHeight, FR, _refImage_sum_I->_pitchData);
+	sumI_II_RowsKernel<FR><<<blocks, threads>>>(_refImageData->_array2D, _refImage_sum_I->_array2D, _refImage_sum_II->_array2D, _refWidth, _refHeight, _refImage_sum_I->_pitchData);
 	CudaCheckError();
 	CUDA_SAFE_CALL(cudaUnbindTexture(tex32F0));
 
 	_tempArray_float->array3DCopy_float( _refImage_sum_I->_array2D, cudaMemcpyDeviceToDevice, _refImage_sum_I->_pitchData);
 	CUDA_SAFE_CALL(cudaBindTextureToArray(tex32F0_float, _tempArray_float->_array3D ));
-	sumI_II_ColsKernel<<<blocks, threads>>>(_refImage_sum_I->_array2D, _refWidth, _refHeight, _refImage_sum_I->_pitchData, FR);
+	sumI_II_ColsKernel<FR><<<blocks, threads>>>(_refImage_sum_I->_array2D, _refWidth, _refHeight, _refImage_sum_I->_pitchData);
 	CudaCheckError();
 	CUDA_SAFE_CALL(cudaUnbindTexture(tex32F0_float));
 
 	_tempArray_float->array3DCopy_float( _refImage_sum_II->_array2D, cudaMemcpyDeviceToDevice, _refImage_sum_II->_pitchData);
 	CUDA_SAFE_CALL(cudaBindTextureToArray(tex32F0_float, _tempArray_float->_array3D));
-	sumI_II_ColsKernel<<<blocks, threads>>>(_refImage_sum_II->_array2D, _refWidth, _refHeight, _refImage_sum_II->_pitchData, FR);
+	sumI_II_ColsKernel<FR><<<blocks, threads>>>(_refImage_sum_II->_array2D, _refWidth, _refHeight, _refImage_sum_II->_pitchData);
 	CudaCheckError();
 	CUDA_SAFE_CALL(cudaUnbindTexture(tex32F0_float));
 

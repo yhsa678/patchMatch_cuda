@@ -33,10 +33,11 @@ public:
 	Array2D_wrapper<float> * _SPMap; // selection probability map
 	Array2D_wrapper<float> * _SPMapT;
 
+	Array2D_wrapper<float> * _matchCost;
+	Array2D_wrapper<float> * _matchCostT;
+
 	Array2d_refImg *_refImage;
 	Array2d_refImg *_refImageT;
-
-
 	//Array2D_wrapper<float> * _randDepth;
 	//Array2D_wrapper<float> * _randDepthT;
 
