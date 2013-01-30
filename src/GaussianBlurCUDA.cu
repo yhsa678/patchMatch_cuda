@@ -126,7 +126,7 @@ void GaussianBlurCUDA::CreateFilterKernel(float sigma, float* kernel, int& width
 	rv = 1.0f/ksum; for(i=0; i<width; i++) kernel[i]*=rv;
 
 	//for(i = 0; i < width; i++)
-	//	kernel[i] = 1.0f/(float)width;
+	//	kernel[i] = 1.0f/(float)width/(float)width;
 }
 
 template<int FR> void GaussianBlurCUDA::FilterImage(cudaArray *dst, cudaArray *src)
