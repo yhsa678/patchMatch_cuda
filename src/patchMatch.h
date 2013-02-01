@@ -58,7 +58,8 @@ public:
 	int _numOfSamples;
 //--------------------------------------------------
 	PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId, int numOfSamples);
-	void run();
+
+	void runPatchMatch();
 
 	~PatchMatch();
 	
@@ -70,7 +71,7 @@ private:
 	void transposeBackward();
 
 	void computeCUDAConfig(int width, int height, int blockDim_x, int blockDim_y);
-	
+	template<int WINDOWSIZES> void run();
 };
 
 
