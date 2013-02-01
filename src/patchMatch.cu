@@ -9,12 +9,12 @@
 
 template<int WINDOWSIZES>
 __global__ void topToDown(bool isFirstStart, float *, float *, float *, float *, int, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
-	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated, unsigned int);
+	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated, unsigned int, float);
 
 
 template<int WINDOWSIZES>
 __global__ void downToTop(bool isFirstStart, float *, float *, float *, float *, int, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
-	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated, unsigned int);
+	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated, unsigned int, float);
 
 texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> allImgsTexture;
 texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> refImgTexture;
@@ -117,9 +117,9 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 	}
 } 
 
-PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId, int numOfSamples): 
+PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId, int numOfSamples, float SPMAlpha, int gaussianSigma): 
 	_imageDataBlock(NULL), _allImages_cudaArrayWrapper(NULL), _nearRange(nearRange), _farRange(farRange), _halfWindowSize(halfWindowSize), _blockDim_x(blockDim_x), _blockDim_y(blockDim_y), _refImageId(refImageId),
-		_depthMap(NULL), _SPMap(NULL), _psngState(NULL), _depthMapT(NULL), _SPMapT(NULL), _numOfSamples(numOfSamples), _refImage(NULL), _refImageT(NULL)
+		_depthMap(NULL), _SPMap(NULL), _psngState(NULL), _depthMapT(NULL), _SPMapT(NULL), _numOfSamples(numOfSamples), _refImage(NULL), _refImageT(NULL), _SPMAlpha(SPMAlpha), _gaussianSigma(gaussianSigma)
 {
 	_numOfTargetImages = static_cast<int>(allImage.size()) - 1;
 	if(_numOfTargetImages == 0)
@@ -236,7 +236,7 @@ void PatchMatch::runPatchMatch()
 {
 	if(_halfWindowSize > 26 || _halfWindowSize < 0)
 	{
-		std::cout<< "half of the window size cannot be larger than 26" << std::endl;
+		std::cout<< "half of the window size cannot be larger than 26 or smaller than 0" << std::endl;
 		std::cout<< "stereo is not done" << std::endl;
 		return;
 	}
@@ -284,9 +284,10 @@ template<int WINDOWSIZES> void PatchMatch::run()
 	std::cout<< "started" << std::endl;
 	std::cout<< "the window size is: " << WINDOWSIZES << std::endl;
 	CudaTimer t;
-	GaussianBlurCUDA gFilter(_refWidth, _refHeight, 2.0f);
-	GaussianBlurCUDA gFilterT(_depthMapT->getWidth(), _depthMapT->getHeight(), 2.0f);
+	GaussianBlurCUDA gFilter(_refWidth, _refHeight, _gaussianSigma);
+	GaussianBlurCUDA gFilterT(_depthMapT->getWidth(), _depthMapT->getHeight(), _gaussianSigma);
 
+	float SPMAlphaSquare = _SPMAlpha * _SPMAlpha;
 	bool isFirstStart = true;
 	int sizeOfdynamicSharedMemory = sizeof(float) * N * _numOfTargetImages + sizeof(unsigned int) * (_numOfTargetImages/32 + 1) * N;
 
@@ -307,7 +308,7 @@ template<int WINDOWSIZES> void PatchMatch::run()
 		topToDown<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCostT->_array2D, _refImageT->_refImageData->_array2D,  _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D, _refImageT->_refImage_sum_I->_pitchData,
 			_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
 			_SPMapT->_array2D, _SPMapT->_pitchData, 
-			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages);
+			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
 		CudaCheckError();
 		gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
 		
@@ -322,7 +323,7 @@ template<int WINDOWSIZES> void PatchMatch::run()
 		topToDown<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCost->_array2D, _refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D, _refImage->_refImage_sum_I->_pitchData,
 			_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
-			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages);
+			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
 		gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
 
 	////////// right to left sweep
@@ -332,7 +333,7 @@ template<int WINDOWSIZES> void PatchMatch::run()
 		downToTop<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCostT->_array2D, _refImageT->_refImageData->_array2D, _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D, _refImageT->_refImage_sum_I->_pitchData,
 			_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
 			_SPMapT->_array2D, _SPMapT->_pitchData,
-			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages);
+			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
 		CudaCheckError();
 		gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
 		
@@ -343,7 +344,7 @@ template<int WINDOWSIZES> void PatchMatch::run()
 		downToTop<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCost->_array2D, _refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D, _refImage->_refImage_sum_I->_pitchData,
 			_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
-			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages);
+			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
 		gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
 		t.stopRecord();
 	}
@@ -568,7 +569,7 @@ inline __device__ void readImageIntoSharedMemory(float *refImg_I, int row, int c
 
 template<int WINDOWSIZES>
 __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, float *refImgI, float *refImgII, int refImgPitch, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
-	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated, unsigned int _numOfTargetImages)
+	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated, unsigned int _numOfTargetImages, float SPMAlphaSquare)
 {
 	int col = blockDim.x * blockIdx.x + threadIdx.x;
 	int threadId = threadIdx.x;
@@ -730,7 +731,7 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 					//	printf("cost[0]: %f, d: %f, threadId: %d, blockIdx: %d, imageId: %d, row: %d, col: %d\n", cost[0] , d, threadId, blockIdx.x, imageId, row, col);
 				}
 				//writePitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col, cost[0]);
-				cost[0] = exp(-0.5 * cost[0] * cost[0] / (0.2 * 0.2));
+				cost[0] = exp(-0.5 * cost[0] * cost[0] / (SPMAlphaSquare ));
 				writePitchMemory(SPMap, SPMapPitch,row + imageId * refImageHeight, col, cost[0]); // write SPMap
 			}
 
@@ -745,7 +746,7 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 
 template<int WINDOWSIZES>
 __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, float *refImgI, float *refImgII, int refImgPitch, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
-	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated, unsigned int _numOfTargetImages)
+	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated, unsigned int _numOfTargetImages, float SPMAlphaSquare)
 {
 	int col = blockDim.x * blockIdx.x + threadIdx.x;
 	int threadId = threadIdx.x;
@@ -887,7 +888,7 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 				//		printf("cost[0]: %f, d: %f, threadId: %d, blockIdx: %d\n", cost[0] , d, threadId, blockIdx.x);
 				}
 				//writePitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col, cost[0]);
-				cost[0] = exp(-0.5 * cost[0] * cost[0] / (0.2 * 0.2));
+				cost[0] = exp(-0.5 * cost[0] * cost[0] / (SPMAlphaSquare));
 				//cost[0] = exp(cost[0] * cost[0] * (-12.5f));
 				writePitchMemory(SPMap, SPMapPitch,row + imageId * refImageHeight, col, cost[0]); // write SPMap
 			}

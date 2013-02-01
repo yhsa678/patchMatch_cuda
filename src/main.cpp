@@ -22,7 +22,8 @@ void main(int argc, char *argv[])
 	int refImageId; // the reference id starts from 0
 	int halfWindowSize;
 	int numOfSamples;
-
+	float SPMAlpha;
+	int gaussianSigma;
 
 	try
 	{
@@ -36,6 +37,8 @@ void main(int argc, char *argv[])
 		halfWindowSize = pt.get<int>("params.halfWindowSize");
 		numOfSamples = pt.get<int>("params.numOfSamples");
 
+		SPMAlpha = pt.get<float>("params.SPMAlpha");
+		gaussianSigma = pt.get<float>("params.gaussianSigma");
 	}
 	catch(std::exception const&  ex)
 	{
@@ -52,7 +55,7 @@ void main(int argc, char *argv[])
 
 	int blockDim_x = 32;
 	int blockDim_y = 16;
-	PatchMatch pm(allImage, nearRange, farRange, halfWindowSize, blockDim_x, blockDim_y, refImageId, numOfSamples);
+	PatchMatch pm(allImage, nearRange, farRange, halfWindowSize, blockDim_x, blockDim_y, refImageId, numOfSamples, SPMAlpha, gaussianSigma );
 	pm.runPatchMatch();
 
 // save the file:
