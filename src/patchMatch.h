@@ -58,7 +58,7 @@ public:
 	int _numOfSamples;
 
 	float _SPMAlpha;
-	int _gaussianSigma;
+	float _gaussianSigma;
 //--------------------------------------------------
 	PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId, int numOfSamples, float SPMAlpha, int gaussianSigma);
 
@@ -75,6 +75,11 @@ private:
 
 	void computeCUDAConfig(int width, int height, int blockDim_x, int blockDim_y);
 	template<int WINDOWSIZES> void run();
+	template<int WINDOWSIZES> void applyTopToDownIsRotated(bool isRotated, int sizeOfdynamicSharedMemory, bool isFirstStart, float SPMAlphaSquare, int numOfSamples);
+	template<int WINDOWSIZES> void applyTopToDownNotRotated(bool isRotated, int sizeOfdynamicSharedMemory, bool isFirstStart, float SPMAlphaSquare, int numOfSamples);
+	template<int WINDOWSIZES> void applyDownToTopIsRotated(bool isRotated, int sizeOfdynamicSharedMemory, bool isFirstStart, float SPMAlphaSquare, int numOfSamples);
+	template<int WINDOWSIZES> void applyDownToTopNotRotated(bool isRotated, int sizeOfdynamicSharedMemory, bool isFirstStart, float SPMAlphaSquare, int numOfSamples);
+
 };
 
 

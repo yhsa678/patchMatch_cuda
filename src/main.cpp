@@ -23,8 +23,8 @@ void main(int argc, char *argv[])
 	int halfWindowSize;
 	int numOfSamples;
 	float SPMAlpha;
-	int gaussianSigma;
-
+	float gaussianSigma;
+	std::string outputFileName;
 	try
 	{
 		boost::property_tree::ptree pt;
@@ -36,9 +36,9 @@ void main(int argc, char *argv[])
 		refImageId = pt.get<int>("params.refImageId");
 		halfWindowSize = pt.get<int>("params.halfWindowSize");
 		numOfSamples = pt.get<int>("params.numOfSamples");
-
 		SPMAlpha = pt.get<float>("params.SPMAlpha");
 		gaussianSigma = pt.get<float>("params.gaussianSigma");
+		outputFileName = pt.get<std::string>("params.outputFileName");
 	}
 	catch(std::exception const&  ex)
 	{
@@ -59,6 +59,7 @@ void main(int argc, char *argv[])
 	pm.runPatchMatch();
 
 // save the file:
-	pm._depthMap->saveToFile("depthMap.txt");		// save the depthmap
+	//pm._depthMap->saveToFile("depthMap.txt");		// save the depthmap
+	pm._depthMap->saveToFile(outputFileName.c_str());
 
 }
