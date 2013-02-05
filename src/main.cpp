@@ -23,7 +23,7 @@ void main(int argc, char *argv[])
 	int halfWindowSize;
 	int numOfSamples;
 	float SPMAlpha;
-	int gaussianSigma;
+	float gaussianSigma;
 
 	try
 	{

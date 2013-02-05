@@ -6,6 +6,7 @@
 
 #define MAX_NUM_IMAGES 128
 #define MAX_WINDOW_SIZE	53 
+#define HANDLE_BOUNDARY
 
 template<int WINDOWSIZES>
 __global__ void topToDown(bool isFirstStart, float *, float *, float *, float *, int, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
@@ -117,7 +118,7 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 	}
 } 
 
-PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId, int numOfSamples, float SPMAlpha, int gaussianSigma): 
+PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId, int numOfSamples, float SPMAlpha, float gaussianSigma): 
 	_imageDataBlock(NULL), _allImages_cudaArrayWrapper(NULL), _nearRange(nearRange), _farRange(farRange), _halfWindowSize(halfWindowSize), _blockDim_x(blockDim_x), _blockDim_y(blockDim_y), _refImageId(refImageId),
 		_depthMap(NULL), _SPMap(NULL), _psngState(NULL), _depthMapT(NULL), _SPMapT(NULL), _numOfSamples(numOfSamples), _refImage(NULL), _refImageT(NULL), _SPMAlpha(SPMAlpha), _gaussianSigma(gaussianSigma)
 {
@@ -392,16 +393,18 @@ inline __device__ float drawRandNum(curandState *state, int statePitch, int col,
 template<int WINDOWSIZES> 
 inline __device__ float computeNCC(const int &threadId, const float *refImg_I, const float *refImg_sum_I, const float *refImg_sum_II, 
 	//const int &imageId, const float &centerRow, const float &centerCol, const float &depth, const int &halfWindowSize, const bool &isRotated, const float& refImgWidth, const float& refImgHeight)
-	const int &imageId, const float &rowMinusHalfwindowPlusHalf, const float &colMinusHalfwindowPlusHalf, const float &depth, const int &windowSize, const bool &isRotated, const int &halfWindowSize )
+	const int &imageId, const float &rowMinusHalfwindowPlusHalf, const float &colMinusHalfwindowPlusHalf, const float &depth, const int &windowSize, const bool &isRotated, const int &halfWindowSize ,
+	const int &refImageWidth, const int &refImageHeight)
 	// here the return resutls are 1-NCC, so the range is [0, 2], the smaller value, the better color consistency
 {
 	float sum_I_Iprime = 0;
 	float sum_Iprime_Iprime = 0;
 	float sum_Iprime = 0;
 	float Iprime;
-
+	
 	float transform[9]; 
 	float *transformBase = transformHH + 18 * imageId;
+	int numOfPixels = 0;
 	//for(int i = 0; i<9; i++)
 	{
 		transform[0] = (transformBase)[0] - (transformBase)[9]/depth;
@@ -415,7 +418,6 @@ inline __device__ float computeNCC(const int &threadId, const float *refImg_I, c
 		transform[8] = (transformBase)[8] - (transformBase)[17]/depth;
 		//transform[i] = (transformHH + 18 * imageId)[i] - (transformHH + 18 * imageId)[i+9]/depth;
 	}
-
 	float z;
 	float col_prime;
 	float row_prime;
@@ -451,38 +453,63 @@ inline __device__ float computeNCC(const int &threadId, const float *refImg_I, c
 	float sum_Iprime_Iprime_row;
 	float sum_I_Iprime_row; 
 
+#ifdef HANDLE_BOUNDARY
+	float localRowMinusHalfwindowPlusHalf = rowMinusHalfwindowPlusHalf;
+	float localColMinusHalfwindowPlusHalf;// = colMinusHalfwindowPlusHalf;
+#endif
+
+
 	for(int localSharedMemRow = 0; localSharedMemRow < WINDOWSIZES; localSharedMemRow ++)
 	{
 		sum_Iprime_row = 0.0f;
 		sum_Iprime_Iprime_row = 0.0f;
 		sum_I_Iprime_row = 0.0f;
-		for(int localSharedMemCol = 0; localSharedMemCol < WINDOWSIZES; localSharedMemCol++)
+		
+#ifdef HANDLE_BOUNDARY
+		if( localRowMinusHalfwindowPlusHalf >= 0.5 && localRowMinusHalfwindowPlusHalf <= refImageHeight- 0.5)
+#endif
 		{
-			// do transform to get the new position
-			Iprime = tex2DLayered(allImgsTexture, col_prime/z + 0.5f, row_prime/z + 0.5f, imageId); // textures are not rotated
-			sum_Iprime_Iprime_row += (Iprime * Iprime);
-			sum_Iprime_row += Iprime;
-			sum_I_Iprime_row += (Iprime * refImg_I[refImg_I_Ind++]);
-
-			if(!isRotated)
+#ifdef HANDLE_BOUNDARY
+			localColMinusHalfwindowPlusHalf = colMinusHalfwindowPlusHalf;
+#endif
+			for(int localSharedMemCol = 0; localSharedMemCol < WINDOWSIZES; localSharedMemCol++)
 			{
-				z += transform[6];
-				col_prime += transform[0];
-				row_prime += transform[3];
+				// do transform to get the new position
+#ifdef HANDLE_BOUNDARY
+				if(localColMinusHalfwindowPlusHalf >=0.5 && localColMinusHalfwindowPlusHalf <= refImageWidth - 0.5)
+#endif
+				{
+					Iprime = tex2DLayered(allImgsTexture, col_prime/z + 0.5f, row_prime/z + 0.5f, imageId); // textures are not rotated
+					sum_Iprime_Iprime_row += (Iprime * Iprime);
+					sum_Iprime_row += Iprime;
+					sum_I_Iprime_row += (Iprime * refImg_I[refImg_I_Ind++]);
+					numOfPixels++;
+				}
+#ifdef HANDLE_BOUNDARY
+				++localColMinusHalfwindowPlusHalf;
+#endif
+				if(!isRotated)
+				{
+					z += transform[6];
+					col_prime += transform[0];
+					row_prime += transform[3];
+				}
+				else
+				{
+					z += transform[7];
+					col_prime += transform[1];
+					row_prime += transform[4];
+				}
 			}
-			else
-			{
-				z += transform[7];
-				col_prime += transform[1];
-				row_prime += transform[4];
-			}
+			sum_Iprime += sum_Iprime_row;
+			sum_Iprime_Iprime += sum_Iprime_Iprime_row;
+			sum_I_Iprime += sum_I_Iprime_row;
 		}
-		sum_Iprime += sum_Iprime_row;
-		sum_Iprime_Iprime += sum_Iprime_Iprime_row;
-		sum_I_Iprime += sum_I_Iprime_row;
+#ifdef HANDLE_BOUNDARY
+		++localRowMinusHalfwindowPlusHalf;
+#endif
 
 		refImg_I_Ind = ( base_refImg_I_Ind += (3 * N));
-
 		if(!isRotated) 
 		{
 			z = (base_z += transform[7] );
@@ -497,14 +524,14 @@ inline __device__ float computeNCC(const int &threadId, const float *refImg_I, c
 		}
 	}	
 	//float numOfPixels = static_cast<float>((halfWindowSize * 2 + 1)*(halfWindowSize * 2 + 1));
-	float numOfPixels = static_cast<float>(windowSize * windowSize );
+	//float numOfPixels = static_cast<float>(windowSize * windowSize );
 
 //	float cost = (refImg_sum_II[threadId] - refImg_sum_I[threadId] * refImg_sum_I[threadId]/ numOfPixels) 
 	//	* (sum_Iprime_Iprime - sum_Iprime * sum_Iprime/ numOfPixels); 
 	//float cost = ((refImg_sum_II[threadId]*numOfPixels - refImg_sum_I[threadId] * refImg_sum_I[threadId]) 
 	//	* (sum_Iprime_Iprime*numOfPixels - sum_Iprime * sum_Iprime)); 
-	float cost1 = refImg_sum_II[threadId] - refImg_sum_I[threadId] * refImg_sum_I[threadId]/ numOfPixels;
-	float cost2 = sum_Iprime_Iprime - sum_Iprime * sum_Iprime/ numOfPixels; 
+	float cost1 = refImg_sum_II[threadId] - refImg_sum_I[threadId] * refImg_sum_I[threadId]/ (float)numOfPixels;
+	float cost2 = sum_Iprime_Iprime - sum_Iprime * sum_Iprime/ (float)numOfPixels; 
 	cost1 = cost1 < 0.00001? 0.0f : cost1;
 	cost2 = cost2 < 0.00001? 0.0f : cost2;
 	float cost = sqrt(cost1 * cost2);
@@ -514,7 +541,7 @@ inline __device__ float computeNCC(const int &threadId, const float *refImg_I, c
 	{
 		//float norminator = sum_I_Iprime * numOfPixels - refImg_sum_I[threadId] * sum_Iprime;
 		//return 1 -  abs(norminator)/(cost);
-		cost = 1 - (sum_I_Iprime -  refImg_sum_I[threadId] * sum_Iprime/numOfPixels )/(cost);
+		cost = 1 - (sum_I_Iprime -  refImg_sum_I[threadId] * sum_Iprime/ (float)numOfPixels )/(cost);
 		return cost;
 	}
 }
@@ -617,7 +644,7 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 			float cost1stRow;
 			for(int imageId = 0; imageId < _numOfTargetImages; imageId ++)
 			{
-				cost1stRow = computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], windowSize, isRotated, halfWindowSize);
+				cost1stRow = computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], windowSize, isRotated, halfWindowSize, refImageWidth, refImageHeight);
 				writePitchMemory(matchCost, SPMapPitch,  imageId * refImageHeight, col, cost1stRow);
 				cost1stRow = exp(-0.5 * cost1stRow * cost1stRow / (0.2 * 0.2));
 				writePitchMemory(SPMap, SPMapPitch, imageId * refImageHeight, col, cost1stRow); // write SPMap
@@ -687,13 +714,13 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 				// image id is i( id != -1). Test the id using NCC, with 3 different depth. 				
 				if(imageId != -1)
 				{
-					cost[0] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], windowSize, isRotated, halfWindowSize);			// accumulate the cost
+					cost[0] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], windowSize, isRotated, halfWindowSize, refImageWidth, refImageHeight);			// accumulate the cost
 					if(!isFirstStart)
 						cost[1] += accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col);
 					else
-						cost[1] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_current_array[threadId], windowSize, isRotated, halfWindowSize);
+						cost[1] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_current_array[threadId], windowSize, isRotated, halfWindowSize, refImageWidth, refImageHeight);
 					
-					cost[2] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], windowSize, isRotated, halfWindowSize);	
+					cost[2] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], windowSize, isRotated, halfWindowSize, refImageWidth, refImageHeight);	
 					//cost[2] += cost[1] + 0.1;
 				}
 			}	
@@ -715,22 +742,13 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 			{
 				if(idx != 1 || isFirstStart)
 				{	
-					cost[0] = computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, bestDepth, windowSize, isRotated, halfWindowSize);
-					//computeNCCTest(testValue, threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, bestDepth, windowSize, isRotated);
-					//if(blockIdx.x == 0 && threadIdx.x == 0 && imageId == 0)
-					//	printf("cost[0]: %f\n", cost[0]);
+					cost[0] = computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, bestDepth, windowSize, isRotated, halfWindowSize, refImageWidth, refImageHeight);
 					writePitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col, cost[0]);
-					//float a = accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col);
 				} 
 				else
 				{
 					cost[0] = accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col);
-					//cost[0] = computeNCC(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, bestDepth, windowSize, isRotated);
-					float d = computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, bestDepth, windowSize, isRotated, halfWindowSize);
-					//if(abs(cost[0] - d) > 0.05)
-					//	printf("cost[0]: %f, d: %f, threadId: %d, blockIdx: %d, imageId: %d, row: %d, col: %d\n", cost[0] , d, threadId, blockIdx.x, imageId, row, col);
 				}
-				//writePitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col, cost[0]);
 				cost[0] = exp(-0.5 * cost[0] * cost[0] / (SPMAlphaSquare ));
 				writePitchMemory(SPMap, SPMapPitch,row + imageId * refImageHeight, col, cost[0]); // write SPMap
 			}
@@ -777,7 +795,6 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 		unsigned int* selectedImages = (unsigned int*)(normalizedSPMap + N * _numOfTargetImages);
 	
 		depth_former_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, refImageHeight - 1, col); 	// depth for 1st element
-
 
 		__shared__ curandState localState[N];
 		if(!isRotated)
@@ -854,12 +871,9 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 				// image id is i( id != -1). Test the id using NCC, with 3 different depth. 				
 				if(imageId != -1)
 				{
-					//cost[0] +=  computeNCC(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, (float)row, (float)col, depth_former_array[threadId], halfWindowSize, isRotated, (float)refImageWidth, (float)refImageHeight);			// accumulate the cost
-					cost[0] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], windowSize, isRotated, halfWindowSize);			// accumulate the cost
-					//cost[1] +=  computeNCC(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_current_array[threadId], windowSize, isRotated);
+					cost[0] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], windowSize, isRotated, halfWindowSize, refImageWidth, refImageHeight);			// accumulate the cost
 					cost[1] += accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col);
-
-					cost[2] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], windowSize, isRotated, halfWindowSize);
+					cost[2] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], windowSize, isRotated, halfWindowSize, refImageWidth, refImageHeight);
 				}
 			}	
 			// find the minimum cost id, and then put cost into global memory 
@@ -871,25 +885,18 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 			writePitchMemory(depthMap, depthMapPitch, row, col, bestDepth);
 			depth_former_array[threadId] = bestDepth;
 
-
 			for(int imageId = 0; imageId < _numOfTargetImages; imageId ++)
 			{
 				if(idx != 1)
 				{
-					cost[0] = computeNCC<WINDOWSIZES> (threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, bestDepth, windowSize, isRotated, halfWindowSize);
+					cost[0] = computeNCC<WINDOWSIZES> (threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, bestDepth, windowSize, isRotated, halfWindowSize, refImageWidth, refImageHeight);
 					writePitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col, cost[0]);
 				}
 				else
 				{
 					cost[0] = accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col);
-				//	cost[0] = computeNCC(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, bestDepth, windowSize, isRotated);
-				//	float d = computeNCC(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, bestDepth, windowSize, isRotated);
-				//	if(abs(cost[0] - d) > 0.01)
-				//		printf("cost[0]: %f, d: %f, threadId: %d, blockIdx: %d\n", cost[0] , d, threadId, blockIdx.x);
 				}
-				//writePitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col, cost[0]);
 				cost[0] = exp(-0.5 * cost[0] * cost[0] / (SPMAlphaSquare));
-				//cost[0] = exp(cost[0] * cost[0] * (-12.5f));
 				writePitchMemory(SPMap, SPMapPitch,row + imageId * refImageHeight, col, cost[0]); // write SPMap
 			}
 			
