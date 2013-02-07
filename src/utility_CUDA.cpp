@@ -84,6 +84,7 @@ void setBestGPUDevice()
 		int best_gpu = 0;
 		CUDA_SAFE_CALL(cudaChooseDevice(&best_gpu, &allDevice[0]));
 		cudaSetDevice(best_gpu);
+		delete []allDevice;
 	}
 	else if(number_of_devices == 0)
 	{
@@ -91,6 +92,10 @@ void setBestGPUDevice()
 		exit(EXIT_FAILURE);
 	}
 	else
+	{		
+		cudaDeviceProp device;
+		cudaGetDeviceProperties(&device, 0);
+		std::cout<< "the device name is: " << device.name << std::endl;
 		cudaSetDevice(0);
-
+	}
 }
