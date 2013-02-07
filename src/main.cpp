@@ -4,7 +4,7 @@
 #include "patchMatch.h"
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/ini_parser.hpp>
-
+#include "utility_CUDA.h"
 
 
 void main(int argc, char *argv[])
@@ -14,6 +14,8 @@ void main(int argc, char *argv[])
 		std::cout << "Initialization file is mandatory to run the code" << std::endl;
 		return;
 	}
+	setBestGPUDevice();
+
 	std::string iniFileName = argv[1];
 
 	std::string imageInfoFileName;

@@ -311,7 +311,7 @@ template<int WINDOWSIZES> void PatchMatch::run()
 			_SPMapT->_array2D, _SPMapT->_pitchData, 
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
 		CudaCheckError();
-		//gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
+		gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
 		
 		//t.stopRecord();
 ////-----------------------------------------------------------
@@ -325,7 +325,7 @@ template<int WINDOWSIZES> void PatchMatch::run()
 			_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
-		//gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
+		gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
 
 	////////// right to left sweep
 		transposeForward();
@@ -336,7 +336,7 @@ template<int WINDOWSIZES> void PatchMatch::run()
 			_SPMapT->_array2D, _SPMapT->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
 		CudaCheckError();
-		//gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
+		gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
 		
 	//////// bottom to top sweep
 		transposeBackward();
@@ -346,7 +346,7 @@ template<int WINDOWSIZES> void PatchMatch::run()
 			_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
-		//gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
+		gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
 		t.stopRecord();
 	}
 

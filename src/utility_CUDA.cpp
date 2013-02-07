@@ -59,3 +59,38 @@ void viewData1DDevicePointer(float * data, int size)
 	thrust::copy(dev_ptr, dev_ptr + size, std::ostream_iterator<float>(std::cout, " "));
 	std::cout<< std::endl;
 }
+
+namespace{
+	bool compareDevice(const cudaDeviceProp &d1, const cudaDeviceProp &d2)
+	{
+		bool result = (d1.major > d2.major) || 
+			((d1.major == d2.major) && (d1.minor > d2.minor)) ||
+			((d1.major == d2.major) && (d1.minor == d2.minor) && (d1.multiProcessorCount > d2.multiProcessorCount));
+		return result;
+	}
+}
+
+void setBestGPUDevice()
+{
+	int number_of_devices;
+	cudaGetDeviceCount(&number_of_devices);
+	if (number_of_devices > 1) {
+		cudaDeviceProp *allDevice = new cudaDeviceProp[number_of_devices];
+
+		for (int device_index = 0; device_index < number_of_devices; device_index++) {
+			cudaGetDeviceProperties(&allDevice[device_index], device_index);
+		}
+		std::sort(allDevice, allDevice+number_of_devices, compareDevice);
+		int best_gpu = 0;
+		CUDA_SAFE_CALL(cudaChooseDevice(&best_gpu, &allDevice[0]));
+		cudaSetDevice(best_gpu);
+	}
+	else if(number_of_devices == 0)
+	{
+		printf("No Nvidia GPU is detected in the machine");
+		exit(EXIT_FAILURE);
+	}
+	else
+		cudaSetDevice(0);
+
+}
