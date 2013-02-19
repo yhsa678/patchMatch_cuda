@@ -31,9 +31,8 @@ void Image::updateCamParam(float *K, float *R, float *T, std::string imageFileNa
 	_imageData = cv::imread(imageFileName);
 
 	// convert color image to grey image
-	cv::cvtColor(_imageData, _imageData, CV_BGR2GRAY);
-
-
+	if(_imageData.channels() != 1)
+		cv::cvtColor(_imageData, _imageData, CV_BGR2GRAY);
 }
 
 bool readMiddleBurry(std::string fileName,  std::vector<Image> &allImages)
