@@ -29,8 +29,10 @@ __global__ void sumI_II_RowsKernel( float *output_I, float *output_sum_I, float 
 		sum_I += texValue;
 		sum_II += (texValue * texValue);
 		//sum += tex2D(tex32F0, x + (float)k, y) * g_Kernel[FR - k]; 
+		
 	}
-
+	if(iy == 576 && ix == 0)
+		printf("texValue: %f", tex2DLayered(tex32F0, x , y, 0));
 	//d_Dst[ IMAD(iy, imageW, ix) ] = sum;
 	int outputAddr = iy * dataPitch/sizeof(float) + ix;
 	output_sum_I[outputAddr] = sum_I;
