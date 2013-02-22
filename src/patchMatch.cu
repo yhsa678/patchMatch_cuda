@@ -393,7 +393,7 @@ inline __device__ float drawRandNum(curandState *state, int statePitch, int col,
 template<int WINDOWSIZES> 
 inline __device__ float computeNCC(const int &threadId, const float *refImg_I, const float *refImg_sum_I, const float *refImg_sum_II, 
 	//const int &imageId, const float &centerRow, const float &centerCol, const float &depth, const int &halfWindowSize, const bool &isRotated, const float& refImgWidth, const float& refImgHeight)
-	const int &imageId, const float &rowMinusHalfwindowPlusHalf, const float &colMinusHalfwindowPlusHalf, const float &depth, const int &windowSize, const bool &isRotated, const int &halfWindowSize ,
+	const int &imageId, const float &rowMinusHalfwindowPlusHalf, const float &colMinusHalfwindowPlusHalf, const float &depth, const bool &isRotated, const int &halfWindowSize ,
 	const int &refImageWidth, const int &refImageHeight)
 	// here the return resutls are 1-NCC, so the range is [0, 2], the smaller value, the better color consistency
 {
@@ -601,53 +601,45 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 	int col = blockDim.x * blockIdx.x + threadIdx.x;
 	int threadId = threadIdx.x;
 	extern __shared__ float normalizedSPMap[];
+	
+	float colMinusHalfwindowPlusHalf = (float)col - halfWindowSize + 0.5f;
+	__shared__ float depth_array[3 * N];
+	float * depth_former_array = depth_array;
+	float * depth_current_array = depth_array + N;
+	float * randDepth = depth_array + 2*N;
 
+	__shared__ float refImg_sum_I[N];
+	__shared__ float refImg_sum_II[N];
+	__shared__ float refImg_I[N *3 * WINDOWSIZES];
+
+	unsigned int s = (_numOfTargetImages >> 5) + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
+	unsigned int* selectedImages = (unsigned int*)(normalizedSPMap + N * _numOfTargetImages);
+
+	__shared__ curandState localState[N];		
 	if(col < refImageWidth)
 	{
-		int windowSize = 2 * halfWindowSize + 1;
-		float colMinusHalfwindowPlusHalf = (float)col - halfWindowSize + 0.5f;
-		//__shared__ float depth_former_array[N]; // N is number of threads per block 
-		//__shared__ float depth_current_array[N]; 
-		__shared__ float depth_array[3 * N];
-		float * depth_former_array = depth_array;
-		float * depth_current_array = depth_array + N;
-		float * randDepth = depth_array + 2*N;
-
-//		__shared__ float normalizedSPMap[N * 10u/*TARGETIMGS*/]; // need plus 1 here ****. It seems not necessary
-		__shared__ float refImg_sum_I[N];
-		__shared__ float refImg_sum_II[N];
-		__shared__ float refImg_I[N *3 * WINDOWSIZES];
-
-//		__shared__ float normalizedSPMap_former[N * TARGETIMGS];
-		unsigned int s = (_numOfTargetImages >> 5) + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
-//		__shared__ unsigned int selectedImages[ N * ( /*TARGETIMGS*/ 10 >>5) + N ]; // this is N * s
-		unsigned int* selectedImages = (unsigned int*)(normalizedSPMap + N * _numOfTargetImages);
-
-		depth_former_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, 0, col); 	// depth for 1st element
-		
-		//for(int i = 0; i<TARGETIMGS; i++)
-		//	normalizedSPMap_former[i*N + threadId] = accessPitchMemory(SPMap, SPMapPitch, i * refImageHeight + 0, col );
-
-		__shared__ curandState localState[N];		
 		if(!isRotated)
 			localState[threadId] = *(randState + col);
 		else
 			localState[threadId] = *((curandState*)((char*)randState + col * randStatePitch));
-
-		float rowMinusHalfwindowPlusHalf = 0.0f - halfWindowSize + 0.5f;
-		//--------------------------------------------------------------------------------------------
-		if(isFirstStart)
+		depth_former_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, 0, col); 	// depth for 1st element
+	}
+	//--------------------------------------------------------------------------------------------
+	float rowMinusHalfwindowPlusHalf = 0.0f - halfWindowSize + 0.5f;
+	if(isFirstStart)
+	{
+		for(int row = 0; row < refImageHeight; ++row)
 		{
-			for(int row = 0; row < refImageHeight; ++row)
+			readImageIntoSharedMemory<WINDOWSIZES>( refImg_I, row, col, threadId, isRotated, halfWindowSize);
+			if(col < refImageWidth)
 			{
 				refImg_sum_I[threadId] = accessPitchMemory(refImgI, refImgPitch, row, col);
 				refImg_sum_II[threadId] = accessPitchMemory(refImgII, refImgPitch, row, col);
-				readImageIntoSharedMemory<WINDOWSIZES>( refImg_I, row, col, threadId, isRotated, halfWindowSize);
 				depth_current_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col);
 				float cost1stRow;
 				for(int imageId = 0; imageId < _numOfTargetImages; imageId ++)
 				{
-					cost1stRow = computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_current_array[threadId], windowSize, isRotated, halfWindowSize, refImageWidth, refImageHeight);
+					cost1stRow = computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_current_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight);
 					writePitchMemory(matchCost, SPMapPitch,  imageId * refImageHeight, col, cost1stRow);
 					cost1stRow = exp(-0.5 * cost1stRow * cost1stRow / SPMAlphaSquare);
 					writePitchMemory(SPMap, SPMapPitch, imageId * refImageHeight, col, cost1stRow); // write SPMap
@@ -655,16 +647,19 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 				++rowMinusHalfwindowPlusHalf;
 			}
 		}
-		rowMinusHalfwindowPlusHalf = 0.0 - halfWindowSize + 0.5;
-		//----------------------------------------------------------------------------------------------
+	}
+	rowMinusHalfwindowPlusHalf = 0.0 - halfWindowSize + 0.5;
+	//----------------------------------------------------------------------------------------------
 
-		for( int row = 1; row < refImageHeight; ++row)
+	for( int row = 1; row < refImageHeight; ++row)
+	{
+		readImageIntoSharedMemory<WINDOWSIZES>( refImg_I, row, col, threadId, isRotated, halfWindowSize);
+
+		if(col < refImageWidth)
 		{
 			++rowMinusHalfwindowPlusHalf;
-
 			refImg_sum_I[threadId] = accessPitchMemory(refImgI, refImgPitch, row, col);
 			refImg_sum_II[threadId] = accessPitchMemory(refImgII, refImgPitch, row, col);
-			readImageIntoSharedMemory<WINDOWSIZES>( refImg_I, row, col, threadId, isRotated, halfWindowSize);
 
 			depth_current_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col); 
 			for(int i = 0; i<s; i++)
@@ -673,7 +668,6 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 			if(numOfSamples == 1)
 			{
 				for(int i = 0; i<_numOfTargetImages; i++)
-					//normalizedSPMap[i*N + threadId] = normalizedSPMap_former[i*N + threadId];
 					normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap, SPMapPitch, row-1 + i * refImageHeight, col );	// in the first round I only choose 1 sample. And SPMap is chosen from 
 			}
 			else
@@ -706,7 +700,6 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 			// normalize
 			for(int i = 0; i<_numOfTargetImages; i++)
 				normalizedSPMap[i * N + threadId] /= normalizedSPMap[N * (_numOfTargetImages -1) + threadId];
-
 			// draw samples and set the bit to 0
 			float numOfTestedSamples = 0;
 			float cost[3] = {0.0f};
@@ -738,14 +731,13 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 				// image id is i( id != -1). Test the id using NCC, with 3 different depth. 				
 				if(imageId != -1)
 				{
-					cost[0] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], windowSize, isRotated, halfWindowSize, refImageWidth, refImageHeight);			// accumulate the cost
+					cost[0] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight);			// accumulate the cost
 					if(!isFirstStart)
 						cost[1] += accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col);
 					else
-						cost[1] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_current_array[threadId], windowSize, isRotated, halfWindowSize, refImageWidth, refImageHeight);
+						cost[1] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_current_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight);
 					
-					cost[2] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], windowSize, isRotated, halfWindowSize, refImageWidth, refImageHeight);	
-					//cost[2] += cost[1] + 0.1;
+					cost[2] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight);	
 				}
 			}	
 			// find the minimum cost id, and then put cost into global memory 
@@ -766,7 +758,7 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 			{
 				if(idx != 1 || isFirstStart)
 				{	
-					cost[0] = computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, bestDepth, windowSize, isRotated, halfWindowSize, refImageWidth, refImageHeight);
+					cost[0] = computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, bestDepth, isRotated, halfWindowSize, refImageWidth, refImageHeight);
 					writePitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col, cost[0]);
 				} 
 				else
@@ -776,14 +768,16 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 				cost[0] = exp(-0.5 * cost[0] * cost[0] / (SPMAlphaSquare ));
 				writePitchMemory(SPMap, SPMapPitch,row + imageId * refImageHeight, col, cost[0]); // write SPMap
 			}
-
-		
 		}
+	}
+	if(col < refImageWidth)
+	{
 		if(!isRotated)
 			*(randState + col) = localState[threadId];
 		else
 			*((curandState*)((char*)randState + col * randStatePitch)) = localState[threadId];
 	}
+	
 }
 
 template<int WINDOWSIZES>
@@ -794,45 +788,43 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 	int threadId = threadIdx.x;
 	extern __shared__ float normalizedSPMap[];
 
+	//if(col < refImageWidth)
+	
+	float colMinusHalfwindowPlusHalf = (float)col - halfWindowSize + 0.5f;
+	__shared__ float depth_array[3 * N];
+	float * depth_former_array = depth_array;
+	float * depth_current_array = depth_array + N;
+	float * randDepth = depth_array + 2*N;
+
+	__shared__ float refImg_sum_I[N];
+	__shared__ float refImg_sum_II[N];
+	__shared__ float refImg_I[N *3 * WINDOWSIZES];	// WINDOWSIZE SHOULD BE SMALLER LESS THAN N
+
+	unsigned int s = (_numOfTargetImages >> 5) + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
+	unsigned int* selectedImages = (unsigned int*)(normalizedSPMap + N * _numOfTargetImages);
+
+	__shared__ curandState localState[N];
 	if(col < refImageWidth)
 	{
-		int windowSize = halfWindowSize * 2 + 1;
-		float colMinusHalfwindowPlusHalf = (float)col - halfWindowSize + 0.5f;
-		//__shared__ float depth_former_array[N]; // N is number of threads per block 
-		//__shared__ float depth_current_array[N]; 
-		__shared__ float depth_array[3 * N];
-		float * depth_former_array = depth_array;
-		float * depth_current_array = depth_array + N;
-		float * randDepth = depth_array + 2*N;
-		//__shared__ float sumOfSPMap[N]; 
-		//__shared__ float normalizedSPMap[N * /*TARGETIMGS*/ 10u]; // need plus 1 here ****. It seems not necessary
-
-		__shared__ float refImg_sum_I[N];
-		__shared__ float refImg_sum_II[N];
-		__shared__ float refImg_I[N *3 * WINDOWSIZES];	// WINDOWSIZE SHOULD BE SMALLER LESS THAN N
-		
-
-		//__shared__ float normalizedSPMap_former[N * TARGETIMGS];
-		unsigned int s = (_numOfTargetImages >> 5) + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
-		//__shared__ unsigned int selectedImages[ N * ( /*TARGETIMGS*/ 10u >>5) + N ]; // this is N * s
-
-		unsigned int* selectedImages = (unsigned int*)(normalizedSPMap + N * _numOfTargetImages);
-	
-		depth_former_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, refImageHeight - 1, col); 	// depth for 1st element
-
-		__shared__ curandState localState[N];
 		if(!isRotated)
 			localState[threadId] = *(randState + col);
 		else
 			localState[threadId] = *((curandState*)((char*)randState + col * randStatePitch));
-		float rowMinusHalfwindowPlusHalf = refImageHeight - 1.0f - halfWindowSize + 0.5f;
-		for(int row = refImageHeight - 2; row >=0; --row)
+		depth_former_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, refImageHeight - 1, col); 	// depth for 1st element
+	}
+
+	float rowMinusHalfwindowPlusHalf = refImageHeight - 1.0f - halfWindowSize + 0.5f;
+	//------------------------------------------------------------------------
+
+	for(int row = refImageHeight - 2; row >=0; --row)
+	{
+		readImageIntoSharedMemory<WINDOWSIZES>( refImg_I, row, col, threadId, isRotated, halfWindowSize);
+
+		if(col < refImageWidth)
 		{
 			--rowMinusHalfwindowPlusHalf;
-
 			refImg_sum_I[threadId] = accessPitchMemory(refImgI, refImgPitch, row, col);
 			refImg_sum_II[threadId] = accessPitchMemory(refImgII, refImgPitch, row, col);
-			readImageIntoSharedMemory<WINDOWSIZES>( refImg_I, row, col, threadId, isRotated, halfWindowSize);
 
 			depth_current_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col); 
 			for(int i = 0; i<s; i++)
@@ -842,7 +834,6 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 			{
 				for(int i = 0; i<_numOfTargetImages; i++)
 					normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap, SPMapPitch, (row + 1) + i * refImageHeight, col );	// in the first round I only choose 1 sample. And SPMap is chosen from 
-			//		//normalizedSPMap[i*N + threadId] = normalizedSPMap_former[i*N + threadId];
 			}
 			else
 			{
@@ -872,7 +863,6 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 				//		+ accessPitchMemory(SPMap, SPMapPitch, row -1 + i * refImageHeight, col)
 				//		+ accessPitchMemory(SPMap, SPMapPitch, row +1 + i * refImageHeight, col)
 				//		)/3.0f;		// average of the near two
-
 				//}			
 			}
 
@@ -880,18 +870,14 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 			for(int i = 1; i<_numOfTargetImages; i++)		
 				normalizedSPMap[i * N + threadId] += normalizedSPMap[(i-1) * N + threadId ];
 			// normalize
-			//sumOfSPMap[threadId] = normalizedSPMap[N * (TARGETIMGS - 1) + threadId];
 			for(int i = 0; i<_numOfTargetImages; i++)
-				//normalizedSPMap[i * N + threadId] /= sumOfSPMap[threadId];
 				normalizedSPMap[i * N + threadId] /= normalizedSPMap[N * (_numOfTargetImages -1) + threadId];
-
 			// draw samples and set the bit to 0
 			float numOfTestedSamples = 0.0f;
 			float cost[3] = {0.0f};
 
 			// here it is better to generate a random depthmap
 			randDepth[threadId] = curand_uniform(&localState[threadId]) * (depthRangeFar - depthRangeNear) + depthRangeNear;
-	
 			for(int j = 0; j < numOfSamples; j++)
 			{
 				float randNum = curand_uniform(&localState[threadId]); 
@@ -916,9 +902,9 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 				// image id is i( id != -1). Test the id using NCC, with 3 different depth. 				
 				if(imageId != -1)
 				{
-					cost[0] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], windowSize, isRotated, halfWindowSize, refImageWidth, refImageHeight);			// accumulate the cost
+					cost[0] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight);			// accumulate the cost
 					cost[1] += accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col);
-					cost[2] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], windowSize, isRotated, halfWindowSize, refImageWidth, refImageHeight);
+					cost[2] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight);
 				}
 			}	
 			// find the minimum cost id, and then put cost into global memory 
@@ -934,7 +920,7 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 			{
 				if(idx != 1)
 				{
-					cost[0] = computeNCC<WINDOWSIZES> (threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, bestDepth, windowSize, isRotated, halfWindowSize, refImageWidth, refImageHeight);
+					cost[0] = computeNCC<WINDOWSIZES> (threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, bestDepth, isRotated, halfWindowSize, refImageWidth, refImageHeight);
 					writePitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col, cost[0]);
 				}
 				else
@@ -943,8 +929,12 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 				}
 				cost[0] = exp(-0.5 * cost[0] * cost[0] / (SPMAlphaSquare));
 				writePitchMemory(SPMap, SPMapPitch,row + imageId * refImageHeight, col, cost[0]); // write SPMap
-			}
-		}
+			} // for
+		} // if(col < refImageWidth)
+	} // for
+	
+	if(col < refImageWidth)
+	{
 		if(!isRotated)
 			*(randState + col) = localState[threadId];
 		else
