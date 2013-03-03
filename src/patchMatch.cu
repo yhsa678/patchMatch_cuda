@@ -89,7 +89,7 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 	if(numOfChannels != allImage[referenceId]._imageData.channels())
 	{ std::cout<< "reference Image has different number of channels with target images"<< std::endl; 
 	 exit(EXIT_FAILURE);}
-	_refImageDataBlock = new unsigned char[_refWidth * _refHeight * numOfChannels]; 
+	_refImageDataBlock = new unsigned char[_refWidth * _refHeight * numOfChannels](); 
 	if( allImage[referenceId]._imageData.isContinuous())
 		memcpy((void *)_refImageDataBlock, allImage[referenceId]._imageData.data, _refWidth * _refHeight * numOfChannels * sizeof(unsigned char));
 	else
@@ -104,7 +104,7 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 		}
 	}
 
-	_transformHH = new float[18 * _numOfTargetImages];
+	_transformHH = new float[18 * _numOfTargetImages]();
 	int offset = 0;
 	for(unsigned int i = 0; i< allImage.size(); i++)
 	{
@@ -675,7 +675,7 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 				//if(row == refImageHeight - 1)
 				{
 					for(int i = 0; i<_numOfTargetImages; i++)
-						normalizedSPMap[i * N + threadId ] = (accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) 
+						normalizedSPMap[i * N + threadId ] = (accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col)
 						+ accessPitchMemory(SPMap, SPMapPitch, row-1 + i * refImageHeight, col) )/2.0f;		// average of the near two
 				}
 				//else
@@ -840,7 +840,7 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 				//for(int i = 0; i<TARGETIMGS; i++)
 				//	normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) /*/ (sumOfSPMap[threadId] + FLT_MIN )*/;	// devide by 0
 				for(int i = 0; i<_numOfTargetImages; i++)
-					normalizedSPMap[i * N + threadId ] = (accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) 
+					normalizedSPMap[i * N + threadId ] = (accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col)
 						+ accessPitchMemory(SPMap, SPMapPitch, (row + 1) + i * refImageHeight, col) )/2.0f;		// average of the near two
 					//normalizedSPMap[i * N + threadId ] = (normalizedSPMap_former[i*N + threadId] 
 					//	+ accessPitchMemory(SPMap, SPMapPitch, row + i * refImageHeight, col) )/2.0f;
