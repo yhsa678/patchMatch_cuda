@@ -9,6 +9,13 @@
 
 void main(int argc, char *argv[])
 {
+	//float x = 0.00000003001f;
+	//float y = 0.0000123f;
+	//float z = x * y;
+	//std::cout<< "z: " << z << std::endl;
+
+
+
 	if(argc <2)
 	{
 		std::cout << "Initialization file is mandatory to run the code" << std::endl;

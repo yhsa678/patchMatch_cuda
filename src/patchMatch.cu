@@ -6,6 +6,11 @@
 
 #define MAX_NUM_IMAGES 128
 #define MAX_WINDOW_SIZE	53 
+
+#define FIX_STATE_PROB (0.9f)
+#define CHANGE_STATE_PROB (1.0f - FIX_STATE_PROB)
+
+
 //#define HANDLE_BOUNDARY
 
 template<int WINDOWSIZES>
@@ -639,16 +644,38 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 				float cost1stRow;
 				for(int imageId = 0; imageId < _numOfTargetImages; imageId ++)
 				{
+					// compute cost for current depth
 					cost1stRow = computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_current_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight);
-					writePitchMemory(matchCost, SPMapPitch,  imageId * refImageHeight, col, cost1stRow);
-					cost1stRow = exp(-0.5 * cost1stRow * cost1stRow / SPMAlphaSquare);
-					writePitchMemory(SPMap, SPMapPitch, imageId * refImageHeight, col, cost1stRow); // write SPMap
+					writePitchMemory(matchCost, SPMapPitch,  row + imageId * refImageHeight, col, cost1stRow);
+					//cost1stRow = exp(-0.5 * cost1stRow * cost1stRow / SPMAlphaSquare);
+					//writePitchMemory(SPMap, SPMapPitch, row + imageId * refImageHeight, col, cost1stRow); // write SPMap
 				}
 				++rowMinusHalfwindowPlusHalf;
 			}
 		}
 	}
 	rowMinusHalfwindowPlusHalf = 0.0 - halfWindowSize + 0.5;
+	//----------------------------------------------------------------------------------------------
+	// precompute the message from down to top. SPMap is used to save the message! Then these backward messages are going to be used later
+	float beta_hat = 1.0f;
+	for(int row = refImageHeight - 1; row >=0; row--)
+	{
+		for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+		{
+			writePitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col, beta_hat);
+		}
+		float sum = 0.0f;
+		for(int imageId = 0; imageId < _numOfTargetImages; imageId ++)
+		{
+			// update beta_hat: 1) read in cost		2) update
+			float emission = accessPitchMemory(matchCost, SPMapPitch, imageId * refImageHeight + row, col);
+			emission = exp( -0.5 * emission * emission/SPMAlphaSquare);
+			beta_hat *= emission;
+			beta_hat = beta_hat * FIX_STATE_PROB + (1-beta_hat) * CHANGE_STATE_PROB;
+			sum += beta_hat; 
+		}
+		beta_hat /= sum;
+	}
 	//----------------------------------------------------------------------------------------------
 
 	for( int row = 1; row < refImageHeight; ++row)
