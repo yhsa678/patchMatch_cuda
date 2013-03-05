@@ -7,7 +7,7 @@
 #define MAX_NUM_IMAGES 128
 #define MAX_WINDOW_SIZE	53 
 
-#define FIX_STATE_PROB (0.9f)
+#define FIX_STATE_PROB (0.95f)
 #define CHANGE_STATE_PROB (1.0f - FIX_STATE_PROB)
 
 
@@ -316,7 +316,7 @@ template<int WINDOWSIZES> void PatchMatch::run()
 			_SPMapT->_array2D, _SPMapT->_pitchData, 
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
 		CudaCheckError();
-		gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
+		//gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
 		
 		//t.stopRecord();
 ////-----------------------------------------------------------
@@ -330,29 +330,29 @@ template<int WINDOWSIZES> void PatchMatch::run()
 			_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
-		gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
+	//	//gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
 
-	////////// right to left sweep
-		transposeForward();
-		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
-		isRotated = true;
-		downToTop<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCostT->_array2D, _refImageT->_refImageData->_array2D, _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D, _refImageT->_refImage_sum_I->_pitchData,
-			_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
-			_SPMapT->_array2D, _SPMapT->_pitchData,
-			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
-		CudaCheckError();
-		gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
-		
-	//////// bottom to top sweep
-		transposeBackward();
-		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), N, 1);
-		isRotated = false;
-		downToTop<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCost->_array2D, _refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D, _refImage->_refImage_sum_I->_pitchData,
-			_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
-			_SPMap->_array2D, _SPMap->_pitchData,
-			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
-		gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
-		t.stopRecord();
+	//////////// right to left sweep
+	//	transposeForward();
+	//	computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
+	//	isRotated = true;
+	//	downToTop<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCostT->_array2D, _refImageT->_refImageData->_array2D, _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D, _refImageT->_refImage_sum_I->_pitchData,
+	//		_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
+	//		_SPMapT->_array2D, _SPMapT->_pitchData,
+	//		numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
+	//	CudaCheckError();
+	//	//gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
+	//	
+	////////// bottom to top sweep
+	//	transposeBackward();
+	//	computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), N, 1);
+	//	isRotated = false;
+	//	downToTop<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCost->_array2D, _refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D, _refImage->_refImage_sum_I->_pitchData,
+	//		_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
+	//		_SPMap->_array2D, _SPMap->_pitchData,
+	//		numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
+	//	//gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
+	//	t.stopRecord();
 	}
 
 	
@@ -599,13 +599,31 @@ inline __device__ void readImageIntoSharedMemory(float *refImg_I, int row, int c
 	}
 }
 
+__device__ void computeMessage(float *normalizedSPMap, const int &row, const int &col, const int &threadId, float *matchCost, 
+	const int &SPMapPitch, const float &SPMAlphaSquare, const int &refImageHeight, const int &_numOfTargetImages)
+{
+	float sum = 0.0f;
+	for(int imageId = 0; imageId < _numOfTargetImages; imageId ++)
+	{
+		// update beta_hat: 1) read in cost		2) update
+		float emission = accessPitchMemory(matchCost, SPMapPitch, imageId * refImageHeight + row, col);
+		emission = exp( -0.5 * emission * emission/SPMAlphaSquare);
+		normalizedSPMap[imageId * N + threadId] *= emission;
+		normalizedSPMap[imageId * N + threadId] = normalizedSPMap[imageId * N + threadId] * FIX_STATE_PROB
+			+ (1- normalizedSPMap[imageId * N + threadId]) * CHANGE_STATE_PROB ;
+		sum += normalizedSPMap[imageId * N + threadId];
+	}
+	for(int imageId = 0; imageId < _numOfTargetImages; imageId ++)
+		normalizedSPMap[imageId * N + threadId ] /= sum;	
+}
+
 template<int WINDOWSIZES>
 __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, float *refImgI, float *refImgII, int refImgPitch, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
 	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated, unsigned int _numOfTargetImages, float SPMAlphaSquare)
 {
 	int col = blockDim.x * blockIdx.x + threadIdx.x;
 	int threadId = threadIdx.x;
-	extern __shared__ float normalizedSPMap[];
+	extern __shared__ float normalizedSPMap1[];
 	
 	float colMinusHalfwindowPlusHalf = (float)col - halfWindowSize + 0.5f;
 	__shared__ float depth_array[3 * N];
@@ -618,7 +636,8 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 	__shared__ float refImg_I[N *3 * WINDOWSIZES];
 
 	unsigned int s = (_numOfTargetImages >> 5) + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
-	unsigned int* selectedImages = (unsigned int*)(normalizedSPMap + N * _numOfTargetImages);
+	unsigned int* selectedImages = (unsigned int*)(normalizedSPMap1 + N * _numOfTargetImages);
+	__shared__ float normalizedSPMap[N * 10];// 10 is number of Target Images
 
 	__shared__ curandState localState[N];		
 	if(col < refImageWidth)
@@ -657,33 +676,46 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 	rowMinusHalfwindowPlusHalf = 0.0 - halfWindowSize + 0.5;
 	//----------------------------------------------------------------------------------------------
 	// precompute the message from down to top. SPMap is used to save the message! Then these backward messages are going to be used later
-	float beta_hat = 1.0f;
-	for(int row = refImageHeight - 1; row >=0; row--)
+	//float beta_hat = 1.0f;
+	if(col < refImageWidth)
 	{
 		for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+			normalizedSPMap[imageId * N + threadId ] = 1.0f; 
+		for(int row = refImageHeight - 1; row >=0; row--)
 		{
-			writePitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col, beta_hat);
+			for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+			{
+				writePitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col, normalizedSPMap[imageId * N + threadId]);
+			}				
+			computeMessage(normalizedSPMap, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages);
 		}
-		float sum = 0.0f;
-		for(int imageId = 0; imageId < _numOfTargetImages; imageId ++)
-		{
-			// update beta_hat: 1) read in cost		2) update
-			float emission = accessPitchMemory(matchCost, SPMapPitch, imageId * refImageHeight + row, col);
-			emission = exp( -0.5 * emission * emission/SPMAlphaSquare);
-			beta_hat *= emission;
-			beta_hat = beta_hat * FIX_STATE_PROB + (1-beta_hat) * CHANGE_STATE_PROB;
-			sum += beta_hat; 
-		}
-		beta_hat /= sum;
+		// next compute the forward message
+		for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+			normalizedSPMap[imageId * N + threadId ] = 1.0f; 
+		computeMessage(normalizedSPMap, 0, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages);
+
 	}
 	//----------------------------------------------------------------------------------------------
 
+	__shared__ float forwardMessageTemp[N * 10];	// 10 is number of Target Images
 	for( int row = 1; row < refImageHeight; ++row)
 	{
 		readImageIntoSharedMemory<WINDOWSIZES>( refImg_I, row, col, threadId, isRotated, halfWindowSize);
 
 		if(col < refImageWidth)
 		{
+			for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+				forwardMessageTemp[imageId * N + threadId] = normalizedSPMap[imageId * N + threadId ]; 
+			computeMessage(forwardMessageTemp, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages);
+			// read in the backward message and compute the current state.
+			for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+				forwardMessageTemp[imageId * N + threadId] *= accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col);
+			for(int i = 1; i<_numOfTargetImages; i++)		
+				forwardMessageTemp[i * N + threadId] += forwardMessageTemp[(i-1) * N + threadId ];
+			// normalize
+			for(int i = 0; i<_numOfTargetImages; i++)
+				forwardMessageTemp[i * N + threadId] /= forwardMessageTemp[N * (_numOfTargetImages -1) + threadId];			
+
 			++rowMinusHalfwindowPlusHalf;
 			refImg_sum_I[threadId] = accessPitchMemory(refImgI, refImgPitch, row, col);
 			refImg_sum_II[threadId] = accessPitchMemory(refImgII, refImgPitch, row, col);
@@ -692,42 +724,53 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 			for(int i = 0; i<s; i++)
 				selectedImages[threadId + i * N] = 0;	// initialized to false
 			//---------------------------------
-			if(numOfSamples == 1)
-			{
-				for(int i = 0; i<_numOfTargetImages; i++)
-					normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap, SPMapPitch, row-1 + i * refImageHeight, col );	// in the first round I only choose 1 sample. And SPMap is chosen from 
-			}
-			else
-			{
-				//if(row == refImageHeight - 1)
-				{
-					for(int i = 0; i<_numOfTargetImages; i++)
-						normalizedSPMap[i * N + threadId ] = (accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col)
-						+ accessPitchMemory(SPMap, SPMapPitch, row-1 + i * refImageHeight, col) )/2.0f;		// average of the near two
-				}
-				//else
-				//{
-				//	for(int i = 0; i<_numOfTargetImages; i++)
-				//		normalizedSPMap[i * N + threadId ] = (accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) 
-				//		+ accessPitchMemory(SPMap, SPMapPitch, row-1 + i * refImageHeight, col)
-				//		+ accessPitchMemory(SPMap, SPMapPitch, row +1 + i * refImageHeight, col)
-				//		)/3.0f;		// average of the near two
+			//if(numOfSamples == 1)
+			//{
+			//	for(int i = 0; i<_numOfTargetImages; i++)
+			//		normalizedSPMap[i * N + threadId ] = accessPitchMemory(SPMap, SPMapPitch, row-1 + i * refImageHeight, col );	// in the first round I only choose 1 sample. And SPMap is chosen from 
+			//}
+			//else
+			//{
+			//	//if(row == refImageHeight - 1)
+			//	{
+			//		for(int i = 0; i<_numOfTargetImages; i++)
+			//			normalizedSPMap[i * N + threadId ] = (accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col)
+			//			+ accessPitchMemory(SPMap, SPMapPitch, row-1 + i * refImageHeight, col) )/2.0f;		// average of the near two
+			//	}
+			//	//else
+			//	//{
+			//	//	for(int i = 0; i<_numOfTargetImages; i++)
+			//	//		normalizedSPMap[i * N + threadId ] = (accessPitchMemory(SPMap,  SPMapPitch, row + i * refImageHeight, col) 
+			//	//		+ accessPitchMemory(SPMap, SPMapPitch, row-1 + i * refImageHeight, col)
+			//	//		+ accessPitchMemory(SPMap, SPMapPitch, row +1 + i * refImageHeight, col)
+			//	//		)/3.0f;		// average of the near two
 
-				//}
-				//for(int i = 0; i<_numOfTargetImages; i++)
-				//{
-				//	normalizedSPMap[i * N + threadId ] = (accessPitchMemory(matchCost,  SPMapPitch, row + i * refImageHeight, col) 
-				//		+ accessPitchMemory(matchCost, SPMapPitch, row-1 + i * refImageHeight, col) )/2.0f;		// average of the near two
-				//	normalizedSPMap[i * N + threadId ] = exp(-0.5 * normalizedSPMap[i*N + threadId] * normalizedSPMap[i * N + threadId] / (SPMAlphaSquare));
-				//}
-			}
+			//	//}
+			//	//for(int i = 0; i<_numOfTargetImages; i++)
+			//	//{
+			//	//	normalizedSPMap[i * N + threadId ] = (accessPitchMemory(matchCost,  SPMapPitch, row + i * refImageHeight, col) 
+			//	//		+ accessPitchMemory(matchCost, SPMapPitch, row-1 + i * refImageHeight, col) )/2.0f;		// average of the near two
+			//	//	normalizedSPMap[i * N + threadId ] = exp(-0.5 * normalizedSPMap[i*N + threadId] * normalizedSPMap[i * N + threadId] / (SPMAlphaSquare));
+			//	//}
+			//}
+
+			
+
 			//---------------------------------
-			for(int i = 1; i<_numOfTargetImages; i++)		
-				normalizedSPMap[i * N + threadId] += normalizedSPMap[(i-1) * N + threadId ];
-			// normalize
-			for(int i = 0; i<_numOfTargetImages; i++)
-				normalizedSPMap[i * N + threadId] /= normalizedSPMap[N * (_numOfTargetImages -1) + threadId];
+			//for(int i = 1; i<_numOfTargetImages; i++)		
+			//	normalizedSPMap[i * N + threadId] += normalizedSPMap[(i-1) * N + threadId ];
+			//// normalize
+			//for(int i = 0; i<_numOfTargetImages; i++)
+			//	normalizedSPMap[i * N + threadId] /= normalizedSPMap[N * (_numOfTargetImages -1) + threadId];
 			// draw samples and set the bit to 0
+
+
+			// do propagation from left to right, here I need to find the message. 
+
+
+
+
+
 			float numOfTestedSamples = 0;
 			float cost[3] = {0.0f};
 			// here it is better to generate a random depthmap
@@ -741,7 +784,8 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 				int imageId = -1;				
 				for(unsigned int i = 0; i < _numOfTargetImages; i++)
 				{
-					if(randNum <= normalizedSPMap[i * N + threadId ])
+					//if(randNum <= normalizedSPMap[i * N + threadId ])
+					if(randNum <= forwardMessageTemp[i * N + threadId ])
 					{
 						unsigned int &stateByte = selectedImages[(i>>5) * N + threadId];
 						pos = i - (sizeof(unsigned int) << 3) * (i>>5);  //(i - i /32 * numberOfBitsPerInt)
@@ -792,9 +836,11 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 				{
 					cost[0] = accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col);
 				}
-				cost[0] = exp(-0.5 * cost[0] * cost[0] / (SPMAlphaSquare ));
-				writePitchMemory(SPMap, SPMapPitch,row + imageId * refImageHeight, col, cost[0]); // write SPMap
+				//cost[0] = exp(-0.5 * cost[0] * cost[0] / (SPMAlphaSquare ));
+				//writePitchMemory(SPMap, SPMapPitch,row + imageId * refImageHeight, col, cost[0]); // write SPMap
 			}
+			computeMessage(normalizedSPMap, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages);
+
 		}
 	}
 	if(col < refImageWidth)
