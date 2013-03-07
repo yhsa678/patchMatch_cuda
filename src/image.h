@@ -25,7 +25,7 @@ class Image{
 		cv::Mat _H2;
 
 		void updateCamParam(float *K, float *R, float *T, std::string imageFileName);
-
+		void updateCamParam(float *K, float *R, float *T, const cv::Mat &image);
 		void init_relative(const Image &refImg);
 
 		cv::Mat _imageData;
@@ -33,6 +33,7 @@ class Image{
 };
 
 bool readMiddleBurry(std::string fileName, std::vector<Image> &allImages);
+bool readNVM(std::string fileName, std::vector<Image> &allImages, std::vector<std::pair<float, float>> depthRange);
 
 
 #endif
