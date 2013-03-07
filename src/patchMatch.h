@@ -59,8 +59,9 @@ public:
 
 	float _SPMAlpha;
 	float _gaussianSigma;
+	int _numOfIterations;
 //--------------------------------------------------
-	PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId, int numOfSamples, float SPMAlpha, float gaussianSigma);
+	PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId, int numOfSamples, float SPMAlpha, float gaussianSigma, int numOfIterations);
 
 	void runPatchMatch();
 

@@ -33,6 +33,7 @@ void main(int argc, char *argv[])
 	int numOfSamples;
 	float SPMAlpha;
 	float gaussianSigma;
+	int numOfIterations;
 
 	try
 	{
@@ -48,6 +49,7 @@ void main(int argc, char *argv[])
 
 		SPMAlpha = pt.get<float>("params.SPMAlpha");
 		gaussianSigma = pt.get<float>("params.gaussianSigma");
+		numOfIterations = pt.get<float>("params.numOfIterations");
 	}
 	catch(std::exception const&  ex)
 	{
@@ -64,7 +66,7 @@ void main(int argc, char *argv[])
 
 	int blockDim_x = 32;
 	int blockDim_y = 16;
-	PatchMatch pm(allImage, nearRange, farRange, halfWindowSize, blockDim_x, blockDim_y, refImageId, numOfSamples, SPMAlpha, gaussianSigma );
+	PatchMatch pm(allImage, nearRange, farRange, halfWindowSize, blockDim_x, blockDim_y, refImageId, numOfSamples, SPMAlpha, gaussianSigma, numOfIterations );
 	pm.runPatchMatch();
 
 // save the file:
