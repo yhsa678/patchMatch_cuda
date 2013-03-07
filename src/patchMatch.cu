@@ -74,7 +74,6 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 		{
 			unsigned char *dest = _imageDataBlock + (_maxWidth * numOfChannels * _maxHeight) * dataBlockId ;
 			unsigned char *source = allImage[i]._imageData.data;
-
 			for( int j = 0; j < _maxHeight; j++)
 			{
 				if(j < allImage[i]._imageData.rows)
@@ -148,7 +147,6 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 	_depthMap = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y);
 	_SPMap = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y, _numOfTargetImages);
 	_matchCost = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y, _numOfTargetImages);
-	
 
 	_psngState = new Array2D_psng(_refWidth, _refHeight, _blockDim_x, _blockDim_y);
 
@@ -297,7 +295,7 @@ template<int WINDOWSIZES> void PatchMatch::run()
 
 	float SPMAlphaSquare = _SPMAlpha * _SPMAlpha;
 	bool isFirstStart = true;
-	int sizeOfdynamicSharedMemory = sizeof(float) * N * _numOfTargetImages + sizeof(unsigned int) * (_numOfTargetImages/32 + 1) * N;
+	int sizeOfdynamicSharedMemory = sizeof(float) * N * _numOfTargetImages * 2 + sizeof(unsigned int) * (_numOfTargetImages/32 + 1) * N;
 
 	for(int i = 0; i < _numOfIterations; i++)
 	{
@@ -342,7 +340,6 @@ template<int WINDOWSIZES> void PatchMatch::run()
 			_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
 			_SPMapT->_array2D, _SPMapT->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
-		CudaCheckError();
 		//gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
 		
 	//////// bottom to top sweep
@@ -386,16 +383,6 @@ inline __device__ float drawRandNum(curandState *state, int statePitch, int col,
 	return randNum;
 }
 
-//inline __device__ void doTransform(float &col_prime, float &row_prime, float col, float row, int imageId, float *transform)
-//{
-//	//float *base = &transformHH[0] +  18 * imageId;
-//	//float z = (base[6] - base[15]/depth) * col + (base[7] - base[16]/depth) * row + (base[8] - base[17]/depth);
-//	//*col_prime = ((base[0] - base[9]/depth) * col + (base[1] - base[10]/depth) * row + (base[2] - base[11]/depth))/z;
-//	//*row_prime = ((base[3] - base[12]/depth) * col + (base[4] - base[13]/depth) * row + (base[5] - base[14]/depth))/z;
-//	float z = transform[6] * col + transform[7] * row + transform[8];
-//	col_prime = (transform[0] * col + transform[1] * row + transform[2])/z;
-//	row_prime = (transform[3] * col + transform[4] * row + transform[5])/z;
-//}
 
 template<int WINDOWSIZES> 
 inline __device__ float computeNCC(const int &threadId, const float *refImg_I, const float *refImg_sum_I, const float *refImg_sum_II, 
@@ -601,7 +588,6 @@ inline __device__ void readImageIntoSharedMemory(float *refImg_I, int row, int c
 	}
 }
 
-
 __device__ void computeMessageBackward(float *normalizedSPMap, const int &row, const int &col, const int &threadId, float *matchCost, 
 	const int &SPMapPitch, const float &SPMAlphaSquare, const int &refImageHeight, const int &_numOfTargetImages)
 {
@@ -624,7 +610,6 @@ __device__ void computeMessageBackward(float *normalizedSPMap, const int &row, c
 	}
 
 }
-
 
 __device__ void computeMessageForward(float *normalizedSPMap, const int &row, const int &col, const int &threadId, float *matchCost, 
 	const int &SPMapPitch, const float &SPMAlphaSquare, const int &refImageHeight, const int &_numOfTargetImages)
@@ -670,8 +655,9 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 	__shared__ float refImg_I[N *3 * WINDOWSIZES];
 
 	unsigned int s = (_numOfTargetImages >> 5) + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
-	unsigned int* selectedImages = (unsigned int*)(normalizedSPMap + N * _numOfTargetImages);
-	//__shared__ float normalizedSPMap[N * 10];// 10 is number of Target Images
+
+	unsigned int* selectedImages = (unsigned int*)(normalizedSPMap + 2 * N * _numOfTargetImages);
+	float* forwardMessageTemp = normalizedSPMap + N * _numOfTargetImages;	// 10 is number of Target Images
 
 	__shared__ curandState localState[N];		
 	if(col < refImageWidth)
@@ -732,7 +718,8 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 		computeMessageForward(normalizedSPMap, 0, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages);
 	}
 	//----------------------------------------------------------------------------------------------
-	__shared__ float forwardMessageTemp[N * 10];	// 10 is number of Target Images
+	//__shared__ float forwardMessageTemp[N * 10];	// 10 is number of Target Images
+
 	for( int row = 1; row < refImageHeight; ++row)
 	{
 		readImageIntoSharedMemory<WINDOWSIZES>( refImg_I, row, col, threadId, isRotated, halfWindowSize);
@@ -749,9 +736,6 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 				float zn0 = forwardMessageTemp[imageId * N + threadId] * accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col);
 				float zn1 = (1.0f - forwardMessageTemp[imageId * N + threadId]) * (1.0f- accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col));
 				forwardMessageTemp[imageId * N + threadId] = zn0/(zn0+zn1);
-				//forwardMessageTemp[imageId * N + threadId] *= accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col);
-				//float opp = (1.0f - forwardMessageTemp[imageId * N + threadId]) * (1.0f - accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col));
-				//forwardMessageTemp[imageId * N + threadId] /= (forwardMessageTemp[imageId *N + threadId] + opp);
 			}
 			for(int i = 1; i<_numOfTargetImages; i++)		
 				forwardMessageTemp[i * N + threadId] += forwardMessageTemp[(i-1) * N + threadId ];
@@ -908,7 +892,8 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 	__shared__ float refImg_I[N *3 * WINDOWSIZES];	// WINDOWSIZE SHOULD BE SMALLER LESS THAN N
 
 	unsigned int s = (_numOfTargetImages >> 5) + 1; // 5 is because each int type has 32 bits, and divided by 32 is equavalent to shift 5. s is number of bytes used to save selected images
-	unsigned int* selectedImages = (unsigned int*)(normalizedSPMap + N * _numOfTargetImages);
+	unsigned int* selectedImages = (unsigned int*)(normalizedSPMap + 2 * N * _numOfTargetImages);
+	float* forwardMessageTemp = normalizedSPMap + N * _numOfTargetImages;	// 10 is number of Target Images
 
 	__shared__ curandState localState[N];
 	if(col < refImageWidth)
@@ -947,7 +932,7 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 
 
 	//--------------------------------------------------------------------------
-	__shared__ float forwardMessageTemp[N * 10];
+	//__shared__ float forwardMessageTemp[N * 10];
 	for(int row = refImageHeight - 2; row >=0; --row)
 	{
 		readImageIntoSharedMemory<WINDOWSIZES>( refImg_I, row, col, threadId, isRotated, halfWindowSize);
