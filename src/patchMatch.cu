@@ -936,9 +936,12 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 			// read in the backward message and compute the current state.
 			for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
 			{
-				forwardMessageTemp[imageId * N + threadId] *= accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col);
-				float opp = (1.0f - forwardMessageTemp[imageId * N + threadId]) * (1.0f - accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col));
-				forwardMessageTemp[imageId * N + threadId] /= (forwardMessageTemp[imageId *N + threadId] + opp);
+				//forwardMessageTemp[imageId * N + threadId] *= accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col);
+				//float opp = (1.0f - forwardMessageTemp[imageId * N + threadId]) * (1.0f - accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col));
+				//forwardMessageTemp[imageId * N + threadId] /= (forwardMessageTemp[imageId *N + threadId] + opp);
+				float zn0 = forwardMessageTemp[imageId * N + threadId] * accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col);
+				float zn1 = (1.0f - forwardMessageTemp[imageId * N + threadId]) * (1.0f- accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col));
+				forwardMessageTemp[imageId * N + threadId] = zn0/(zn0+zn1);
 			}
 			for(int i = 1; i<_numOfTargetImages; i++)		
 				forwardMessageTemp[i * N + threadId] += forwardMessageTemp[(i-1) * N + threadId ];
