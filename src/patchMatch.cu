@@ -26,6 +26,9 @@ template<int WINDOWSIZES>
 __global__ void computeAllCostGivenDepth(float *matchCost, int SPMapPitch, float *refImg, float *refImgI, float *refImgII, int refImgPitch, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch,
 	unsigned int _numOfTargetImages);
 
+__global__ void computeBelief(float *matchCost, int SPMapPitch, float *SPMap, int _numOfTargetImages,
+	int refImageWidth, int refImageHeight, float SPMAlphaSquare, curandState *randState, int randStatePitch, bool isRotated);
+
 texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> allImgsTexture;
 texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> refImgTexture;
 __constant__ float transformHH[MAX_NUM_IMAGES * 9 * 2];
@@ -314,14 +317,16 @@ template<int WINDOWSIZES> void PatchMatch::run()
 		t.startRecord();
 		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
 		transposeForward();
+		isRotated = true;
 
 		if(i == 0)
 		{
 			computeAllCostGivenDepth<WINDOWSIZES><<<_gridSize, _blockSize>>>(_matchCostT->_array2D, _matchCostT->_pitchData ,_refImageT->_refImageData->_array2D, _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D,
 			_refImageT->_refImage_sum_I->_pitchData, _depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, _numOfTargetImages);
+			computeBelief<<<_gridSize, _blockSize>>>(_matchCostT->_array2D, _matchCostT->_pitchData, _SPMapT->_array2D, _numOfTargetImages,
+			 _depthMapT->getWidth(),	_depthMapT->getHeight(), SPMAlphaSquare, _psngState->_array2D, _psngState->_pitchData, isRotated);
 			CudaCheckError();
 		}		
-		isRotated = true;
 		topToDown<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCostT->_array2D, _refImageT->_refImageData->_array2D,  _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D, _refImageT->_refImage_sum_I->_pitchData,
 			_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
 			_SPMapT->_array2D, _SPMapT->_pitchData, 
@@ -337,16 +342,25 @@ template<int WINDOWSIZES> void PatchMatch::run()
 		isFirstStart = false;
 		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), N, 1);
 		isRotated = false;
+		CudaCheckError();
+		computeBelief<<<_gridSize, _blockSize>>>(_matchCost->_array2D, _matchCost->_pitchData, _SPMap->_array2D, _numOfTargetImages,
+			 _depthMap->getWidth(),	_depthMap->getHeight(), SPMAlphaSquare, _psngState->_array2D, _psngState->_pitchData, isRotated);
+		CudaCheckError();
+
 		topToDown<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCost->_array2D, _refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D, _refImage->_refImage_sum_I->_pitchData,
 			_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
+		CudaCheckError();
 		//gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
 
 	//////////// right to left sweep
 		transposeForward();
 		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
 		isRotated = true;
+		computeBelief<<<_gridSize, _blockSize>>>(_matchCostT->_array2D, _matchCostT->_pitchData, _SPMapT->_array2D, _numOfTargetImages,
+			 _depthMapT->getWidth(),	_depthMapT->getHeight(), SPMAlphaSquare, _psngState->_array2D, _psngState->_pitchData, isRotated);
+
 		downToTop<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCostT->_array2D, _refImageT->_refImageData->_array2D, _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D, _refImageT->_refImage_sum_I->_pitchData,
 			_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
 			_SPMapT->_array2D, _SPMapT->_pitchData,
@@ -357,6 +371,8 @@ template<int WINDOWSIZES> void PatchMatch::run()
 		transposeBackward();
 		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), N, 1);
 		isRotated = false;
+		computeBelief<<<_gridSize, _blockSize>>>(_matchCost->_array2D, _matchCost->_pitchData, _SPMap->_array2D, _numOfTargetImages,
+			 _depthMap->getWidth(),	_depthMap->getHeight(), SPMAlphaSquare, _psngState->_array2D, _psngState->_pitchData, isRotated);
 		downToTop<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCost->_array2D, _refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D, _refImage->_refImage_sum_I->_pitchData,
 			_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
@@ -653,6 +669,61 @@ __device__ void computeMessageForward(float *normalizedSPMap, const int &row, co
 	}
 }
 
+__global__ void computeBelief(float *matchCost, int SPMapPitch, float *SPMap, int _numOfTargetImages,
+	int refImageWidth, int refImageHeight, float SPMAlphaSquare, curandState *randState, int randStatePitch, bool isRotated)
+{
+	int col = blockDim.x * blockIdx.x + threadIdx.x;
+	int threadId = threadIdx.x;
+
+	__shared__ float normalizedSPMap[N * 10]; // 10 is the number of images
+	//__shared__ float forwardMessage[N * 10];
+	__shared__ curandState localState[N];		
+
+	if(col < refImageWidth)
+	{
+		if(!isRotated)
+			localState[threadId] = *(randState + col);
+		else
+			localState[threadId] = *((curandState*)((char*)randState + col * randStatePitch));
+	}
+
+	if(col < refImageWidth)
+	{
+		// compute the backward message and save it 
+		for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+			normalizedSPMap[imageId * N + threadId] = 0.5f;
+		for(int row = refImageHeight - 1; row >=0; row--)
+		{
+			for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+			{
+				writePitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col, normalizedSPMap[imageId * N + threadId]);
+			}
+			computeMessageBackward(normalizedSPMap, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
+		}
+
+		// compute forwardmessage and get the state to be saved in SPMap
+		for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+			normalizedSPMap[imageId * N + threadId ] = 0.5f; 
+		for(int row = 1; row <= refImageHeight - 1; row++)
+		{
+			computeMessageForward(normalizedSPMap, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
+			for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+			{
+				// read backward message // multiply and normalize
+				float zn0 = normalizedSPMap[imageId * N + threadId] * accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col);
+				float zn1 = (1.0f - normalizedSPMap[imageId * N + threadId]) * (1.0f - accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col));
+				// write it back 
+				writePitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col,  zn0/(zn0 + zn1));
+			}
+		}		
+		// write back states
+		if(!isRotated)
+			*(randState + col) = localState[threadId];
+		else
+			*((curandState*)((char*)randState + col * randStatePitch)) = localState[threadId];
+	}
+}
+
 template<int WINDOWSIZES>
 __global__ void computeAllCostGivenDepth(float *matchCost, int SPMapPitch, float *refImg, float *refImgI, float *refImgII, int refImgPitch, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch,
 	unsigned int _numOfTargetImages)
@@ -727,26 +798,26 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 	//----------------------------------------------------------------------------------------------
 	// precompute the message from down to top. SPMap is used to save the message! Then these backward messages are going to be used later
 	//float beta_hat = 1.0f;
-	if(col < refImageWidth)
-	{
-		for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
-			normalizedSPMap[imageId * N + threadId ] = 0.5f; 
-		for(int row = refImageHeight - 1; row >=0; row--)
-		{
-			for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
-			{
-				writePitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col, normalizedSPMap[imageId * N + threadId]); // the backward message is saved here
-			}				
-			computeMessageBackward(normalizedSPMap, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
-		}
-		for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
-			writePitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + 0, col, normalizedSPMap[imageId * N + threadId]); // the backward message is saved here
+	//if(col < refImageWidth)
+	//{
+	//	for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+	//		normalizedSPMap[imageId * N + threadId ] = 0.5f; 
+	//	for(int row = refImageHeight - 1; row >=0; row--)
+	//	{
+	//		for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+	//		{
+	//			writePitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col, normalizedSPMap[imageId * N + threadId]); // the backward message is saved here
+	//		}				
+	//		computeMessageBackward(normalizedSPMap, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
+	//	}
+	//	for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+	//		writePitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + 0, col, normalizedSPMap[imageId * N + threadId]); // the backward message is saved here
 
-		// next compute the forward message
-		for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
-			normalizedSPMap[imageId * N + threadId ] = 0.5f; 
-		computeMessageForward(normalizedSPMap, 0, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
-	}
+	//	// next compute the forward message
+	//	for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+	//		normalizedSPMap[imageId * N + threadId ] = 0.5f; 
+	//	computeMessageForward(normalizedSPMap, 0, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
+	//}
 	//----------------------------------------------------------------------------------------------
 
 	for( int row = 1; row < refImageHeight; ++row)
@@ -755,16 +826,16 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 
 		if(col < refImageWidth)
 		{
-			for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+			/*for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
 				forwardMessageTemp[imageId * N + threadId] = normalizedSPMap[imageId * N + threadId ]; 
-			computeMessageForward(forwardMessageTemp, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
-
+			computeMessageForward(forwardMessageTemp, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState); */
 			// read in the backward message and compute the current state.
 			for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
 			{
-				float zn0 = forwardMessageTemp[imageId * N + threadId] * accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col);
-				float zn1 = (1.0f - forwardMessageTemp[imageId * N + threadId]) * (1.0f- accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col));
-				forwardMessageTemp[imageId * N + threadId] = zn0/(zn0+zn1);
+			//	float zn0 = forwardMessageTemp[imageId * N + threadId] * accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col);
+			//	float zn1 = (1.0f - forwardMessageTemp[imageId * N + threadId]) * (1.0f- accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col));
+			//	forwardMessageTemp[imageId * N + threadId] = zn0/(zn0+zn1);
+				forwardMessageTemp[imageId * N + threadId] = accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col);
 			}
 			for(int i = 1; i<_numOfTargetImages; i++)		
 				forwardMessageTemp[i * N + threadId] += forwardMessageTemp[(i-1) * N + threadId ];
@@ -850,7 +921,7 @@ __global__ void topToDown(bool isFirstStart, float *matchCost, float *refImg, fl
 				//cost[0] = exp(-0.5 * cost[0] * cost[0] / (SPMAlphaSquare ));
 				//writePitchMemory(SPMap, SPMapPitch,row + imageId * refImageHeight, col, cost[0]); // write SPMap
 			} 
-			computeMessageForward(normalizedSPMap, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
+			//computeMessageForward(normalizedSPMap, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
 
 		}
 	}
@@ -898,28 +969,28 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 
 	float rowMinusHalfwindowPlusHalf = refImageHeight - 1.0f - halfWindowSize + 0.5f;
 	//--------------------------------------------------------------------------
-	if(col < refImageWidth)
-	{
-		for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
-			normalizedSPMap[imageId * N + threadId ] = 0.5f; 
-		for(int row = 0; row <= refImageHeight - 1; row++)
-		{
-			for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
-			{
-				writePitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col, normalizedSPMap[imageId * N + threadId]); // the backward message is saved here
-			}
-			computeMessageBackward(normalizedSPMap, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
-		}
-		for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
-			writePitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + refImageHeight - 1, col, normalizedSPMap[imageId * N + threadId]); // the backward message is saved here
+	//if(col < refImageWidth)
+	//{
+	//	for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+	//		normalizedSPMap[imageId * N + threadId ] = 0.5f; 
+	//	for(int row = 0; row <= refImageHeight - 1; row++)
+	//	{
+	//		for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+	//		{
+	//			writePitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col, normalizedSPMap[imageId * N + threadId]); // the backward message is saved here
+	//		}
+	//		computeMessageBackward(normalizedSPMap, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
+	//	}
+	//	for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+	//		writePitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + refImageHeight - 1, col, normalizedSPMap[imageId * N + threadId]); // the backward message is saved here
 
-		// next compute forward message:
-		for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
-			normalizedSPMap[imageId * N + threadId ] = 0.5f; 
+	//	// next compute forward message:
+	//	for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+	//		normalizedSPMap[imageId * N + threadId ] = 0.5f; 
 
-		computeMessageForward(normalizedSPMap, refImageHeight -1, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
+	//	computeMessageForward(normalizedSPMap, refImageHeight -1, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
 
-	}
+	//}
 
 
 	//--------------------------------------------------------------------------
@@ -930,15 +1001,16 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 
 		if(col < refImageWidth)
 		{
-			for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
-				forwardMessageTemp[imageId * N + threadId] = normalizedSPMap[imageId * N + threadId ]; 
-			computeMessageForward(forwardMessageTemp, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
+			//for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+			//	forwardMessageTemp[imageId * N + threadId] = normalizedSPMap[imageId * N + threadId ]; 
+			//computeMessageForward(forwardMessageTemp, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
 			// read in the backward message and compute the current state.
 			for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
 			{
-				forwardMessageTemp[imageId * N + threadId] *= accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col);
-				float opp = (1.0f - forwardMessageTemp[imageId * N + threadId]) * (1.0f - accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col));
-				forwardMessageTemp[imageId * N + threadId] /= (forwardMessageTemp[imageId *N + threadId] + opp);
+				//forwardMessageTemp[imageId * N + threadId] *= accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col);
+				//float opp = (1.0f - forwardMessageTemp[imageId * N + threadId]) * (1.0f - accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col));
+				//forwardMessageTemp[imageId * N + threadId] /= (forwardMessageTemp[imageId *N + threadId] + opp);
+				forwardMessageTemp[imageId * N + threadId] = accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col);
 			}
 			for(int i = 1; i<_numOfTargetImages; i++)		
 				forwardMessageTemp[i * N + threadId] += forwardMessageTemp[(i-1) * N + threadId ];
@@ -1016,7 +1088,7 @@ __global__ void downToTop(bool isFirstStart, float *matchCost, float *refImg, fl
 				//writePitchMemory(SPMap, SPMapPitch,row + imageId * refImageHeight, col, cost[0]); // write SPMap
 			} // for
 
-			computeMessageForward(normalizedSPMap, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
+			//computeMessageForward(normalizedSPMap, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
 		} // if(col < refImageWidth)
 	} // for
 	
