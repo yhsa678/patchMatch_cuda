@@ -34,7 +34,7 @@ void main(int argc, char *argv[])
 	float SPMAlpha;
 	float gaussianSigma;
 	int numOfIterations;
-
+	std::string outputFileName;
 	try
 	{
 		boost::property_tree::ptree pt;
@@ -59,6 +59,7 @@ void main(int argc, char *argv[])
 		SPMAlpha = pt.get<float>("params.SPMAlpha");
 		gaussianSigma = pt.get<float>("params.gaussianSigma");
 		numOfIterations = pt.get<int>("params.numOfIterations");
+		outputFileName = pt.get<std::string>("params.outputFileName"); 
 	}
 	catch(std::exception const&  ex)
 	{
@@ -98,5 +99,5 @@ void main(int argc, char *argv[])
 	pm.runPatchMatch();
 
 // save the file:
-	pm._depthMap->saveToFile("depthMap.txt");		// save the depthmap
+	pm._depthMap->saveToFile(outputFileName.c_str());		// save the depthmap
 }
