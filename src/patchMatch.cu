@@ -149,18 +149,13 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 
 	// initialize depthmap and SP(selection probability) map
 	_depthMap = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y);
-	_SPMap = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y, _numOfTargetImages);
 	_matchCost = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y, _numOfTargetImages);
 
 	_psngState = new Array2D_psng(_refWidth, _refHeight, _blockDim_x, _blockDim_y);
 
 	_depthMap->randNumGen(_nearRange, _farRange, _psngState->_array2D, _psngState->_pitchData);
-	_SPMap->randNumGen(0.0f, 1.0f, _psngState->_array2D, _psngState->_pitchData);
-	//viewData1DDevicePointer( _SPMap->_array2D, 100);
-
 	_depthMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y);
-	_SPMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y, _numOfTargetImages);
-	_matchCostT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, blockDim_y, _numOfTargetImages);
+//	_matchCostT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, blockDim_y, _numOfTargetImages);
 
 	// reference image
 	_refImage = new Array2d_refImg(_refWidth, _refHeight, blockDim_x, blockDim_y, _refImageDataBlock);
@@ -230,15 +225,17 @@ void PatchMatch::transpose(Array2D_wrapper<float> *input, Array2D_wrapper<float>
 void PatchMatch::transposeForward()
 {
 	transpose(_depthMap, _depthMapT);
-	transpose(_SPMap, _SPMapT);
+	_matchCostT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y, _numOfTargetImages);
 	transpose(_matchCost, _matchCostT);
+	delete _matchCost; _matchCost = NULL;
 }
 
 void PatchMatch::transposeBackward()
 {
 	transpose(_depthMapT, _depthMap);
-	transpose(_SPMapT, _SPMap);
+	_matchCost = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y, _numOfTargetImages);
 	transpose(_matchCostT, _matchCost);
+	delete _matchCostT; _matchCostT = NULL;
 }
 
 void PatchMatch::runPatchMatch()
@@ -294,8 +291,6 @@ template<int WINDOWSIZES> void PatchMatch::run()
 	std::cout<< "the window size is: " << WINDOWSIZES << std::endl;
 	std::cout<< "number of iterations is: " << _numOfIterations << std::endl;
 	CudaTimer t;
-	//GaussianBlurCUDA gFilter(_refWidth, _refHeight, _gaussianSigma);
-	//GaussianBlurCUDA gFilterT(_depthMapT->getWidth(), _depthMapT->getHeight(), _gaussianSigma);
 
 	float SPMAlphaSquare = _SPMAlpha * _SPMAlpha;
 	bool isFirstStart = true;
@@ -315,6 +310,7 @@ template<int WINDOWSIZES> void PatchMatch::run()
 		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
 		transposeForward();
 
+		_SPMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y, _numOfTargetImages);
 		if(i == 0)
 		{
 			computeAllCostGivenDepth<WINDOWSIZES><<<_gridSize, _blockSize>>>(_matchCostT->_array2D, _matchCostT->_pitchData ,_refImageT->_refImageData->_array2D, _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D,
@@ -326,14 +322,11 @@ template<int WINDOWSIZES> void PatchMatch::run()
 			_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
 			_SPMapT->_array2D, _SPMapT->_pitchData, 
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
-		CudaCheckError();
-		//gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
-		
-		//t.stopRecord(); 
-////-----------------------------------------------------------
+		delete _SPMapT; _SPMapT = NULL;
+////----------------------------------------------------------------------------------------------
 //	// top to bottom sweep 
-		//t.startRecord();
 		transposeBackward();
+		_SPMap = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y, _numOfTargetImages);
 		isFirstStart = false;
 		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), N, 1);
 		isRotated = false;
@@ -341,27 +334,29 @@ template<int WINDOWSIZES> void PatchMatch::run()
 			_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
-		//gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
+		delete _SPMap; _SPMap = NULL;
 
 	//////////// right to left sweep
 		transposeForward();
 		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
 		isRotated = true;
+		_SPMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y, _numOfTargetImages);
 		downToTop<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCostT->_array2D, _refImageT->_refImageData->_array2D, _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D, _refImageT->_refImage_sum_I->_pitchData,
 			_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
 			_SPMapT->_array2D, _SPMapT->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
-		//gFilterT.FilterMultipleImages( _SPMapT->_array2D, _SPMapT->_pitchData, _SPMapT->getDepth());
+		delete _SPMapT; _SPMapT = NULL;
 		
 	//////// bottom to top sweep
 		transposeBackward();
+		_SPMap = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y, _numOfTargetImages);
 		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), N, 1);
 		isRotated = false;
 		downToTop<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCost->_array2D, _refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D, _refImage->_refImage_sum_I->_pitchData,
 			_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
-		//gFilter.FilterMultipleImages(_SPMap->_array2D, _SPMap->_pitchData, _SPMap->getDepth());
+		delete _SPMap; _SPMap = NULL;
 		t.stopRecord();
 	}
 
