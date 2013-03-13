@@ -38,6 +38,9 @@ public:
 
 	Array2d_refImg *_refImage;
 	Array2d_refImg *_refImageT;
+
+	CudaArray_wrapper *_transformArray;
+
 	//Array2D_wrapper<float> * _randDepth;
 	//Array2D_wrapper<float> * _randDepthT;
 

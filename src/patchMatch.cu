@@ -28,6 +28,8 @@ __global__ void computeAllCostGivenDepth(float *matchCost, int SPMapPitch, float
 
 texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> allImgsTexture;
 texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> refImgTexture;
+texture<float, cudaTextureType2DLayered, cudaReadModeElementType> transformTexture; 
+
 __constant__ float transformHH[MAX_NUM_IMAGES * 9 * 2];
 
 #define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
@@ -168,10 +170,13 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 	// ---------- initialize array
 	_allImages_cudaArrayWrapper = new CudaArray_wrapper(_maxWidth, _maxHeight, _numOfTargetImages);
 	_refImages_cudaArrayWrapper = new CudaArray_wrapper(_refWidth, _refHeight, 1);
+	_transformArray = new CudaArray_wrapper(18, _numOfTargetImages, 1);
 
 	// ---------- upload image data to GPU
 	_allImages_cudaArrayWrapper->array3DCopy<unsigned char>(_imageDataBlock, cudaMemcpyHostToDevice);
 	_refImages_cudaArrayWrapper->array3DCopy<unsigned char>(_refImageDataBlock, cudaMemcpyHostToDevice);
+	_transformArray->array3DCopy_float(_transformHH, cudaMemcpyHostToDevice, 0);		// the last param is not used
+
 	// attach to texture so that the kernel can access the data
 	allImgsTexture.addressMode[0] = cudaAddressModeBorder; allImgsTexture.addressMode[1] = cudaAddressModeBorder; 
 	allImgsTexture.addressMode[2] = cudaAddressModeBorder;
@@ -183,6 +188,10 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 	refImgTexture.filterMode = cudaFilterModeLinear;	refImgTexture.normalized = false;
 	CUDA_SAFE_CALL(cudaBindTextureToArray(refImgTexture, _refImages_cudaArrayWrapper->_array3D));	// bind to
 
+	transformTexture.addressMode[0] = cudaAddressModeBorder; transformTexture.addressMode[1] = cudaAddressModeBorder;
+	transformTexture.addressMode[2] = cudaAddressModeBorder;
+	transformTexture.filterMode = cudaFilterModePoint;  transformTexture.normalized = false;
+	CUDA_SAFE_CALL(cudaBindTextureToArray(transformTexture, _transformArray->_array3D));
 }
 
 PatchMatch::~PatchMatch()
@@ -209,6 +218,8 @@ PatchMatch::~PatchMatch()
 		delete _refImage;
 	if(_refImageT != NULL)
 		delete _refImageT;
+	if(_transformArray != NULL)
+		delete _transformArray;
 }
 
 void PatchMatch::transpose(Array2D_wrapper<float> *input, Array2D_wrapper<float> *output)
@@ -307,20 +318,16 @@ template<int WINDOWSIZES> void PatchMatch::run()
 			numOfSamples = _numOfSamples;
 		
 		t.startRecord();
-		checkGlobalMemSize();
 		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
 		transposeForward();
 
-		checkGlobalMemSize();
 		_SPMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y, _numOfTargetImages);
-		checkGlobalMemSize();
 		if(i == 0)
 		{
 			computeAllCostGivenDepth<WINDOWSIZES><<<_gridSize, _blockSize>>>(_matchCostT->_array2D, _matchCostT->_pitchData ,_refImageT->_refImageData->_array2D, _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D,
 			_refImageT->_refImage_sum_I->_pitchData, _depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, _numOfTargetImages);
 			CudaCheckError();
 		}		
-		checkGlobalMemSize();
 		isRotated = true;
 		topToDown<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCostT->_array2D, _refImageT->_refImageData->_array2D,  _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D, _refImageT->_refImage_sum_I->_pitchData,
 			_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
@@ -334,27 +341,24 @@ template<int WINDOWSIZES> void PatchMatch::run()
 		isFirstStart = false;
 		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), N, 1);
 		isRotated = false;
-		checkGlobalMemSize();
 		topToDown<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCost->_array2D, _refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D, _refImage->_refImage_sum_I->_pitchData,
 			_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
+		CudaCheckError();
 		delete _SPMap; _SPMap = NULL;
-		checkGlobalMemSize();
 
 	//////////// right to left sweep
-		checkGlobalMemSize();
 		transposeForward();
-		checkGlobalMemSize();
 		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
 		isRotated = true;
 		_SPMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y, _numOfTargetImages);
-		checkGlobalMemSize();
 		downToTop<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(isFirstStart, _matchCostT->_array2D, _refImageT->_refImageData->_array2D, _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D, _refImageT->_refImage_sum_I->_pitchData,
 			_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
 			_SPMapT->_array2D, _SPMapT->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
 		delete _SPMapT; _SPMapT = NULL;
+		CudaCheckError();
 		
 	//////// bottom to top sweep
 		transposeBackward();
@@ -366,8 +370,8 @@ template<int WINDOWSIZES> void PatchMatch::run()
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
 		delete _SPMap; _SPMap = NULL;
-		checkGlobalMemSize();
 		t.stopRecord();
+
 	}
 	
 	/*for(int i = 0; i< _numOfTargetImages; i++)
@@ -411,22 +415,42 @@ inline __device__ float computeNCC(const int &threadId, const float *refImg_I, c
 	float sum_Iprime = 0;
 	float Iprime;
 	
-	float transform[9]; 
-	float *transformBase = transformHH + 18 * imageId;
+	//float transform[9]; 
+	//float *transformBase = transformHH + 18 * imageId;
 	int numOfPixels = 0;
 	//for(int i = 0; i<9; i++)
+	//{
+	//	transform[0] = (transformBase)[0] - (transformBase)[9]/depth;
+	//	transform[1] = (transformBase)[1] - (transformBase)[10]/depth;
+	//	transform[2] = (transformBase)[2] - (transformBase)[11]/depth;
+	//	transform[3] = (transformBase)[3] - (transformBase)[12]/depth;
+	//	transform[4] = (transformBase)[4] - (transformBase)[13]/depth;
+	//	transform[5] = (transformBase)[5] - (transformBase)[14]/depth;
+	//	transform[6] = (transformBase)[6] - (transformBase)[15]/depth;
+	//	transform[7] = (transformBase)[7] - (transformBase)[16]/depth;
+	//	transform[8] = (transformBase)[8] - (transformBase)[17]/depth;
+	//	//transform[i] = (transformHH + 18 * imageId)[i] - (transformHH + 18 * imageId)[i+9]/depth;
+	//}
+
+	float transform[9];
 	{
-		transform[0] = (transformBase)[0] - (transformBase)[9]/depth;
-		transform[1] = (transformBase)[1] - (transformBase)[10]/depth;
-		transform[2] = (transformBase)[2] - (transformBase)[11]/depth;
-		transform[3] = (transformBase)[3] - (transformBase)[12]/depth;
-		transform[4] = (transformBase)[4] - (transformBase)[13]/depth;
-		transform[5] = (transformBase)[5] - (transformBase)[14]/depth;
-		transform[6] = (transformBase)[6] - (transformBase)[15]/depth;
-		transform[7] = (transformBase)[7] - (transformBase)[16]/depth;
-		transform[8] = (transformBase)[8] - (transformBase)[17]/depth;
-		//transform[i] = (transformHH + 18 * imageId)[i] - (transformHH + 18 * imageId)[i+9]/depth;
+		transform[0] = tex2DLayered( transformTexture, 0.5, imageId+0.5, 0) - tex2DLayered( transformTexture, 9.5,  imageId+0.5, 0)/depth;
+		transform[1] = tex2DLayered( transformTexture, 1.5, imageId+0.5, 0) - tex2DLayered( transformTexture, 10.5, imageId+0.5, 0)/depth;
+		transform[2] = tex2DLayered( transformTexture, 2.5, imageId+0.5, 0) - tex2DLayered( transformTexture, 11.5, imageId+0.5, 0)/depth;
+		transform[3] = tex2DLayered( transformTexture, 3.5, imageId+0.5, 0) - tex2DLayered( transformTexture, 12.5, imageId+0.5, 0)/depth;
+		transform[4] = tex2DLayered( transformTexture, 4.5, imageId+0.5, 0) - tex2DLayered( transformTexture, 13.5, imageId+0.5, 0)/depth;
+		transform[5] = tex2DLayered( transformTexture, 5.5, imageId+0.5, 0) - tex2DLayered( transformTexture, 14.5, imageId+0.5, 0)/depth;
+		transform[6] = tex2DLayered( transformTexture, 6.5, imageId+0.5, 0) - tex2DLayered( transformTexture, 15.5, imageId+0.5, 0)/depth;
+		transform[7] = tex2DLayered( transformTexture, 7.5, imageId+0.5, 0) - tex2DLayered( transformTexture, 16.5, imageId+0.5, 0)/depth;
+		transform[8] = tex2DLayered( transformTexture, 8.5, imageId+0.5, 0) - tex2DLayered( transformTexture, 17.5, imageId+0.5, 0)/depth;
 	}
+	/*for(int i = 0; i < 8; i++)
+	{
+		if(transform1[i] != transform[0])
+			printf("It is different: %f,  %f\n", transform1[i], transform[i]);
+	}*/
+
+
 	float z;
 	float col_prime;
 	float row_prime;
