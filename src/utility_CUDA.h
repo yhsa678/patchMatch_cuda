@@ -58,5 +58,6 @@ void viewData1DDevicePointer(float * data, int size);
 
 void setBestGPUDevice();
 
+void checkGlobalMemSize();
 
 #endif

@@ -99,3 +99,14 @@ void setBestGPUDevice()
 		cudaSetDevice(0);
 	}
 }
+
+void checkGlobalMemSize()
+{
+	size_t freeMem, totalMemory, usedMemory;
+	cudaMemGetInfo(&freeMem, &totalMemory);
+	usedMemory = totalMemory - freeMem;
+	std::cout<< "The current free global memory is: " << freeMem/1024.0/1024.0 
+		<< "The current used global memory is: " << usedMemory/1024.0/1024.0 << std::endl;
+
+}
+
