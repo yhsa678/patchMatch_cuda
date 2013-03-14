@@ -110,3 +110,16 @@ void checkGlobalMemSize()
 
 }
 
+void checkSharedMem(int amountOfSharedMemoryUsed)
+{
+	int deviceId;
+	cudaGetDevice (&deviceId);
+	cudaDeviceProp deviceProp;
+	cudaGetDeviceProperties(&deviceProp, deviceId);
+	std::cout<< "The graphics cards has shared memory: " << deviceProp.sharedMemPerBlock << " bytes"<<std::endl;
+	if(deviceProp.sharedMemPerBlock < amountOfSharedMemoryUsed)
+	{
+		std::cout<< "there is not enough shared memory. Try to use less images" << std::endl;
+		exit(EXIT_FAILURE);
+	}
+}

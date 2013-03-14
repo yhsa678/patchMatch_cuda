@@ -60,4 +60,6 @@ void setBestGPUDevice();
 
 void checkGlobalMemSize();
 
+void checkSharedMem(int amountOfSharedMemoryUsed);
+
 #endif

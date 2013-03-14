@@ -302,7 +302,11 @@ template<int WINDOWSIZES> void PatchMatch::run()
 
 	float SPMAlphaSquare = _SPMAlpha * _SPMAlpha;
 	int sizeOfdynamicSharedMemory = sizeof(float) * N * _numOfTargetImages  + sizeof(unsigned int) * (_numOfTargetImages/32 + 1) * N;
-	
+	// calculate amount of shared memory used in total:
+	int totalNumOfSharedMemUsed = ((3 * N) + (N) + (N) + (N * 3 * WINDOWSIZES) + N * sizeof(curandState))*sizeof(float) + sizeOfdynamicSharedMemory;
+	std::cout<< "totolNumber of shared memory used: " << totalNumOfSharedMemUsed << " bytes" << std::endl;
+	std::cout<< "totalNumber of dynamic shared: " << sizeOfdynamicSharedMemory << std::endl;
+	checkSharedMem(totalNumOfSharedMemUsed);
 	for(int i = 0; i < _numOfIterations; i++)
 	{
 	// left to right sweep
@@ -1054,7 +1058,9 @@ __global__ void downToTop(float *matchCost, float *refImg, float *refImgI, float
 
 			for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
 				normalizedSPMap[imageId *N + threadId] = accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row + 1, col);
-			//computeMessageForward(normalizedSPMap, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
+
+			computeMessageForward(normalizedSPMap, row, col, threadId, matchCost, SPMapPitch, SPMAlphaSquare, refImageHeight, _numOfTargetImages, localState);
+
 		} // if(col < refImageWidth)
 	} // for
 	
