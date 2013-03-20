@@ -18,7 +18,7 @@ __global__ void topToDown( float *, float *, float *, float *, int, int refImage
 
 template<int WINDOWSIZES>
 __global__ void downToTop(float *, float *, float *, float *, int, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
-	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated, unsigned int, float);
+	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated, unsigned int, float, float *);
 
 template<int WINDOWSIZES>
 __global__ void computeAllCostGivenDepth(float *matchCost, int SPMapPitch, float *refImg, float *refImgI, float *refImgII, int refImgPitch, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch,
@@ -156,7 +156,8 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 
 	_depthMap->randNumGen(_nearRange, _farRange, _psngState->_array2D, _psngState->_pitchData);
 	_depthMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y);
-//	_matchCostT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, blockDim_y, _numOfTargetImages);
+
+	_occlusionProb = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, blockDim_y, _numOfTargetImages);
 
 	// reference image
 	_refImage = new Array2d_refImg(_refWidth, _refHeight, blockDim_x, blockDim_y, _refImageDataBlock);
@@ -341,7 +342,7 @@ template<int WINDOWSIZES> void PatchMatch::run()
 		_SPMap = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y, _numOfTargetImages);
 		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), N, 1);
 		isRotated = false;
-		topToDown<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(_matchCost->_array2D, _refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D, _refImage->_refImage_sum_I->_pitchData,
+		topToDown<WINDOWSIZES><<< _gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(_matchCost->_array2D, _refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D, _refImage->_refImage_sum_I->_pitchData,
 			_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
@@ -356,7 +357,7 @@ template<int WINDOWSIZES> void PatchMatch::run()
 		downToTop<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(_matchCostT->_array2D, _refImageT->_refImageData->_array2D, _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D, _refImageT->_refImage_sum_I->_pitchData,
 			_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
 			_SPMapT->_array2D, _SPMapT->_pitchData,
-			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
+			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare, NULL);
 		delete _SPMapT; _SPMapT = NULL;
 		CudaCheckError();
 		
@@ -368,18 +369,23 @@ template<int WINDOWSIZES> void PatchMatch::run()
 		downToTop<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(_matchCost->_array2D, _refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D, _refImage->_refImage_sum_I->_pitchData,
 			_depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
 			_SPMap->_array2D, _SPMap->_pitchData,
-			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
+			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare, _occlusionProb->_array2D);
 		delete _SPMap; _SPMap = NULL;
 		t.stopRecord();
 
+		//_SPMapT = new Array2D_wrapper<float>(_refHeight, _refWidth, _blockDim_x, _blockDim_y, _numOfTargetImages);
+		//transpose( _occlusionProb, _SPMapT);
+
 	}
 	
-	/*for(int i = 0; i< _numOfTargetImages; i++)
+	for(int i = 10; i< _numOfTargetImages; i++)
 	{
 		std::stringstream ss; ss<<i;
 		std::string fileName = "_SPMap"+ ss.str() + ".txt";
-		_SPMap->saveToFile(fileName, i);
-	}*/
+		_occlusionProb->saveToFile(fileName, i);
+		//_SPMapT->saveToFile(fileName, i);
+	}
+	
 	std::cout<< "ended " << std::endl;
 }
 
@@ -897,7 +903,7 @@ __global__ void topToDown(float *matchCost, float *refImg, float *refImgI, float
 
 template<int WINDOWSIZES>
 __global__ void downToTop(float *matchCost, float *refImg, float *refImgI, float *refImgII, int refImgPitch, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
-	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated, unsigned int _numOfTargetImages, float SPMAlphaSquare)
+	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated, unsigned int _numOfTargetImages, float SPMAlphaSquare, float *occlusionProb)
 {
 	int col = blockDim.x * blockIdx.x + threadIdx.x;
 	int threadId = threadIdx.x;
@@ -952,6 +958,13 @@ __global__ void downToTop(float *matchCost, float *refImg, float *refImgI, float
 
 	}
 
+	for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+	{
+		if(occlusionProb != NULL)
+		{			
+			writePitchMemory(occlusionProb, SPMapPitch, imageId * refImageHeight + refImageHeight - 1, col, normalizedSPMap[imageId * N + threadId]);
+		}
+	}
 
 	//--------------------------------------------------------------------------
 	//__shared__ float forwardMessageTemp[N * 10];
@@ -979,6 +992,14 @@ __global__ void downToTop(float *matchCost, float *refImg, float *refImgI, float
 				//forwardMessageTemp[imageId * N + threadId] = zn0/(zn0+zn1);
 				normalizedSPMap[imageId * N + threadId] = zn0/(zn0+zn1);
 			}
+			for(int imageId = 0; imageId < _numOfTargetImages; imageId++)
+			{
+				if(occlusionProb != NULL)
+				{					
+					writePitchMemory(occlusionProb, SPMapPitch, imageId * refImageHeight + row, col, normalizedSPMap[imageId * N + threadId]);
+				}
+			}
+
 			for(int i = 1; i<_numOfTargetImages; i++)		
 				//forwardMessageTemp[i * N + threadId] += forwardMessageTemp[(i-1) * N + threadId ];
 				normalizedSPMap[i * N + threadId] += normalizedSPMap[(i-1) * N + threadId ];
