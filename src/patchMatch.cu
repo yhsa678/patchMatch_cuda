@@ -67,7 +67,8 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 		}	
 	}
 	// ---------- assign memory, copy data
-	int sizeOfBlock = _maxWidth * numOfChannels * _maxHeight  * _numOfTargetImages;
+	size_t sizeOfBlock = static_cast<size_t>(_maxWidth) * static_cast<size_t>(numOfChannels)
+		* static_cast<size_t>(_maxHeight)  * static_cast<size_t>(_numOfTargetImages);
 	_imageDataBlock = new unsigned char[sizeOfBlock]();
 	// copy row by row
 	//char *dest = _imageDataBlock;
