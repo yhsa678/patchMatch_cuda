@@ -36,6 +36,8 @@ public:
 	Array2D_wrapper<float> * _matchCost;
 	Array2D_wrapper<float> * _matchCostT;
 
+	Array2D_wrapper<uchar> * _usedImgsID;
+
 	Array2d_refImg *_refImage;
 	Array2d_refImg *_refImageT;
 
