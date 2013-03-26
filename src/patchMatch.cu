@@ -32,7 +32,7 @@ texture<float, cudaTextureType2DLayered, cudaReadModeElementType> transformTextu
 
 #define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
 #define SET_BIT(var,pos)( (var) |= (1 << (pos) ))
-#define N 32
+#define N 64 
 
 void PatchMatch::computeCUDAConfig(int width, int height, int blockDim_x, int blockDim_y)
 {
@@ -86,7 +86,7 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 					memcpy( (void *)dest, (void *)source,  allImage[i]._imageData.cols * numOfChannels * sizeof(unsigned char));	
 					dest += (_maxWidth * numOfChannels);
 					source += allImage[i]._imageData.step;
-				}			
+				}	
 			}
 			++dataBlockId;
 		}
@@ -612,6 +612,9 @@ inline __device__ void readImageIntoSharedMemory(float *refImg_I, int row, int c
 			col -= 2 * N; // go back to the 1st col
 			++row; // increase one row
 		}
+#if N>32
+		__syncthreads();
+#endif
 	}
 	else
 	{
@@ -630,6 +633,9 @@ inline __device__ void readImageIntoSharedMemory(float *refImg_I, int row, int c
 			col -= 2 * N; // go back to the 1st col
 			++row; // increase one row
 		}
+#if N>32
+		__syncthreads();
+#endif
 	}
 }
 
@@ -698,13 +704,13 @@ __global__ void computeAllCostGivenDepth(float *matchCost, int SPMapPitch, float
 
 	for(int row = 0; row < refImageHeight; ++row)
 	{
-		//readImageIntoSharedMemory<WINDOWSIZES>( refImg_I, row, col, threadId, false);
 		readImageIntoSharedMemory<WINDOWSIZES>( refImg_I, row, col, threadId, true);
 		if(col < refImageWidth)
 		{
 			refImg_sum_I[threadId] = accessPitchMemory(refImgI, refImgPitch, row, col);
 			refImg_sum_II[threadId] = accessPitchMemory(refImgII, refImgPitch, row, col);
 			depth_current_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col);
+
 			float cost1stRow;
 			for(int imageId = 0; imageId < _numOfTargetImages; imageId ++)
 			{
