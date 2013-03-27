@@ -10,6 +10,8 @@
 
 __global__ void generate_kernel_float( curandState *state, int statePitch,  float * result, int resultPitch, int width, int height, float rangeStart, float rangeEnd );
 __global__ void generate_kernel_float_withDepth( curandState *state, int statePitch,  float * result, int resultPitch, int width, int height, int depth, float rangeStart, float rangeEnd );
+template<typename T>
+__global__ void initMemory(T *result, int resultPitch, int width, int height, int depth, T initValue);
 
 template<class T>
 class Array2D_wrapper{
@@ -39,6 +41,9 @@ public:
 		}
 	}
 	void randNumGen(float rangeStart, float rangeEnd, curandState * devStates, int pitchState);
+
+	void initValue(T initValue);
+
 	int getWidth();
 	int getHeight();
 	int getDepth();
@@ -118,6 +123,14 @@ void Array2D_wrapper<T> :: randNumGen(float rangeStart, float rangeEnd, curandSt
 }
 
 template<class T>
+void Array2D_wrapper<T>::initValue(T initValue)
+{
+	initMemory<<<_gridSize, _blockSize>>>(_array2D, _pitchData, _width, _height, _depth,  initValue);
+
+}
+
+
+template<class T>
 void Array2D_wrapper<T>::computeCUDAConfig()
 {
 	_blockSize.x = _blockDim_x;
@@ -129,4 +142,19 @@ void Array2D_wrapper<T>::computeCUDAConfig()
 	_gridSize.z = 1;
 }
 
+template<typename T>
+__global__ void initMemory(T *result, int resultPitch, int width, int height, int depth, T initValue)
+{
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	if( x < width && y < height)
+	{
+		T *dataAddr;
+		for(int i = 0; i < depth; i++)
+		{
+			dataAddr = (T*)((char*)result + (y + i * height) * resultPitch) + x;
+			*dataAddr = initValue;
+		}
+	}
+}
 #endif

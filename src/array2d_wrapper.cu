@@ -43,3 +43,5 @@ __global__ void generate_kernel_float_withDepth( curandState *state, int statePi
 	}
 }
 
+
+
