@@ -31,7 +31,12 @@ public:
 	~Array2D_wrapper()
 	{
 		if(_array2D != NULL)
+		{
+			//std::cout<< "started" << std::endl;
 			CUDA_SAFE_CALL(cudaFree((void *) _array2D));
+			_array2D = NULL;
+			//std::cout<< "ended" << std::endl;
+		}
 	}
 	void randNumGen(float rangeStart, float rangeEnd, curandState * devStates, int pitchState);
 	int getWidth();
