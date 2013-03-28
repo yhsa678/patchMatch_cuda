@@ -21,7 +21,7 @@ void main(int argc, char *argv[])
 		std::cout << "Initialization file is mandatory to run the code" << std::endl;
 		return;
 	}
-	setBestGPUDevice();
+	
 
 	std::string iniFileName = argv[1];
 
@@ -34,6 +34,7 @@ void main(int argc, char *argv[])
 	float SPMAlpha;
 	float gaussianSigma;
 	int numOfIterations;
+	int gpuId;
 	std::string outputFileName;
 	try
 	{
@@ -52,6 +53,13 @@ void main(int argc, char *argv[])
 		if(fRange)
 			farRange = fRange.get();
 
+		boost::optional<float> gpuIdOptional = pt.get_optional<float>("params.gpuId");
+		if(gpuIdOptional)
+			gpuId = gpuIdOptional.get();
+		else
+			gpuId = -1;
+
+
 		refImageId = pt.get<int>("params.refImageId");
 		halfWindowSize = pt.get<int>("params.halfWindowSize");
 		numOfSamples = pt.get<int>("params.numOfSamples");
@@ -66,6 +74,8 @@ void main(int argc, char *argv[])
 		printf("Problems with config file: %s\n", ex.what());
 		return;
 	}
+
+	setBestGPUDevice(gpuId);
 
 //-----------------------------------------------------------
 	std::vector<Image> allImage;

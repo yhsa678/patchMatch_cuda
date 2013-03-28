@@ -70,8 +70,17 @@ namespace{
 	}
 }
 
-void setBestGPUDevice()
+void setBestGPUDevice(int gpuID)
 {
+	if(gpuID >= 0)
+	{
+		cudaDeviceProp device;
+		cudaGetDeviceProperties(&device, gpuID);
+		std::cout<< "the device name is: " << device.name << std::endl;
+		cudaSetDevice(gpuID);	
+		return;
+	}
+
 	int number_of_devices;
 	cudaGetDeviceCount(&number_of_devices);
 	if (number_of_devices > 1) {
@@ -83,7 +92,9 @@ void setBestGPUDevice()
 		std::sort(allDevice, allDevice+number_of_devices, compareDevice);
 		int best_gpu = 0;
 		CUDA_SAFE_CALL(cudaChooseDevice(&best_gpu, &allDevice[0]));
+		//best_gpu = 2;
 		cudaSetDevice(best_gpu);
+		std::cout<< "the device name is: " << allDevice[best_gpu].name << std::endl;
 		delete []allDevice;
 	}
 	else if(number_of_devices == 0)

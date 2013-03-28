@@ -56,7 +56,7 @@ void showRGBImage(unsigned char *data, int width, int height);
 
 void viewData1DDevicePointer(float * data, int size);
 
-void setBestGPUDevice();
+void setBestGPUDevice(int gpuId);
 
 void checkGlobalMemSize();
 

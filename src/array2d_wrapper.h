@@ -51,12 +51,44 @@ public:
 	void saveToFile(std::string fileName)
 	{
 		std::fstream fout(fileName, 'w');
+		fout<<_width<<"&"<<_height<< "&"<<_depth<< "&";
+		fout.close();
+
+		std::fstream foutBinary(fileName, std::ios_base::out|std::ios_base::binary|std::ios_base::app);		
 		T *destPtr = new T[_width * _height * _depth];
+		/*destPtr[0] = static_cast<T>(_width);
+		destPtr[1] = static_cast<T>(_height);
+		destPtr[2] = static_cast<T>(_depth);*/
 		copyData(destPtr, _width * sizeof(T) , cudaMemcpyDeviceToHost);
 		std::copy(destPtr, destPtr + _width * _height * _depth, std::ostream_iterator<T>(fout, " "));
+		/*fout.write((char*)&_width, sizeof(int));
+		fout.write((char*)&_height, sizeof(int));
+		fout.write((char*)&_depth, sizeof(int));*/
+		foutBinary.write((char*)destPtr, sizeof(T) * _width*_height*_depth);
 	
 		delete []destPtr;
-		fout.close();
+		foutBinary.close();
+
+
+
+		 //std::ofstream out(filename,std::ios_base::out|std::ios_base::binary);
+   //   verify(out.is_open(),"Failed to open iamge data file.");
+   //   // Write image stat.
+   //   ImageFileStat stat;
+   //   stat.width = image.width();
+   //   stat.height = image.height();
+   //   stat.numChannels = image.numChannels();
+   //   stat.bitDepth = sizeof(Elem)*8;
+   //   // TODO: Create a mechanism for getting a type constant.
+   //   //       Then type can be stored exactly.
+   //   unsigned int type = 0xffffffff;
+   //   out.write((char*)&stat.width,sizeof(unsigned int));
+   //   out.write((char*)&stat.height,sizeof(unsigned int));
+   //   out.write((char*)&stat.numChannels,sizeof(unsigned int));
+   //   out.write((char*)&stat.bitDepth,sizeof(unsigned int));
+   //   out.write((char*)&type,sizeof(unsigned int));
+   //   // Write image data.
+   //   out.write((char*)&image(0,0,0),sizeof(Elem)*image.width()*image.height()*image.numChannels());
 	}
 
 	void saveToFile(std::string fileName, int layer)

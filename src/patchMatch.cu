@@ -9,7 +9,7 @@
 #define FIX_STATE_PROB (0.999f)
 #define CHANGE_STATE_PROB (1.0f - FIX_STATE_PROB)
 
-//#define HANDLE_BOUNDARY
+#define HANDLE_BOUNDARY
 
 template<int WINDOWSIZES>
 __global__ void topToDown( float *, float *, float *, float *, int, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
@@ -32,7 +32,7 @@ texture<float, cudaTextureType2DLayered, cudaReadModeElementType> transformTextu
 
 #define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
 #define SET_BIT(var,pos)( (var) |= (1 << (pos) ))
-#define N 64 
+#define N 32 
 
 void PatchMatch::computeCUDAConfig(int width, int height, int blockDim_x, int blockDim_y)
 {

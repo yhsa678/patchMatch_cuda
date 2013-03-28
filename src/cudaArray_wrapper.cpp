@@ -29,7 +29,8 @@ void CudaArray_wrapper::array3DCopy_float(float *data, enum cudaMemcpyKind kind,
 		CUDA_SAFE_CALL(cudaMemcpy3D(&parameters));
 	}
 	else if(kind == cudaMemcpyHostToDevice)
-	{			struct cudaMemcpy3DParms parameters = {0};
+	{	
+		struct cudaMemcpy3DParms parameters = {0};
 		parameters.extent = make_cudaExtent(_width, _height, _depth);
 		parameters.kind = kind;
 		parameters.dstArray = _array3D;
