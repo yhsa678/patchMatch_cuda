@@ -397,9 +397,11 @@ template<int WINDOWSIZES> void PatchMatch::run()
 	std::cout<< "ended " << std::endl;
 }
 
-inline __device__ float accessPitchMemory(float *data, int pitch, int row, int col)
+template<typename T>
+//inline __device__ float accessPitchMemory(float *data, int pitch, int row, int col)
+inline __device__ T accessPitchMemory(T *data, int pitch, int row, int col)
 {
-	return *((float*)((char*)data + pitch*row) + col);
+	return *((T*)((char*)data + pitch*row) + col);
 }
 
 template<typename T>
@@ -703,54 +705,63 @@ __device__ void computeMessageForward(float *normalizedSPMap, const int &row, co
 	}
 }
 
-//template<int WINDOWSIZES>
-//__global__ void depthRefinement(float *matchCost, int SPMapPitch, float *refImg, float *refImgI, float *refImgII, int refImgPitch, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch,
-//	unsigned int _numOfTargetImages)
-//{
-//	int col = blockDim.x * blockIdx.x + threadIdx.x;
-//	const int threadId = threadIdx.x;
-//
-//	__shared__ float refImg_sum_I[N];
-//	__shared__ float refImg_sum_II[N];
-//	__shared__ float refImg_I[N * 3 * WINDOWSIZES];
-//	__shared__ float depth_current_array[N];
-//	__shared__ float depth_new[N];
-//
-//	float rowMinusHalfwindowPlusHalf = 0.0f - (WINDOWSIZES-1)/2 + 0.5f;
-//	float colMinusHalfwindowPlusHalf = (float)col - (WINDOWSIZES-1)/2 + 0.5f;
-//
-//	for(int row = 0; row < refImageHeight; ++row)
-//	{
-//		readImageIntoSharedMemory<WINDOWSIZES>(refImg_I, row, col, threadId, true);
-//		if(col < refImageWidth)
-//		{
-//			refImg_sum_I[threadId] = accessPitchMemory(refImgI, refImgPitch, row, col);
-//			refImg_sum_II[threadId] = accessPitchMemory(refImgII, refImgPitch, row, col);			
-//			depth_current_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col);
-//			float oldCost = accessPitchMemory(matchCost, SPMapPitch, row,col);
-//			float newCost;
-//			float bestDepth;
-//
-//			for(int i = 0; i < 10; i++)
-//			{
-//				newCost = 0;
-//				// randomly change the depth:
-//			//	depth_new[threadId] = depth_current_array[threadId] + curand_normal() * 0.1f ;
-//				depth_new[threadId] = depth_new[threadId] <= 0? depth_current_array[threadId] : depth_new[threadId];
-//
-//				// 
-//			//	newCost = computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_new[threadId], true, (WINDOWSIZES-1)/2, refImageWidth, refImageHeight);
-//				if(newCost < oldCost)
-//				{
-//					bestDepth = depth_new[threadId];
-//					oldCost = newCost;
-//				}
-//			}
-//			writePitchMemory(depthMap, depthMapPitch, row, col, bestDepth);
-//			++rowMinusHalfwindowPlusHalf;
-//		}
-//	}
-//}
+template<int WINDOWSIZES>
+__global__ void depthRefinement(float *matchCost, int SPMapPitch, float *refImg, float *refImgI, float *refImgII, int refImgPitch, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch,
+	unsigned int _numOfTargetImages, uchar *usedImgsId, int usedImgsIdPitchData,  int numOfSamples, curandState *randState, int randStatePitch )
+{
+	int col = blockDim.x * blockIdx.x + threadIdx.x;
+	const int threadId = threadIdx.x;
+
+	__shared__ float refImg_sum_I[N];
+	__shared__ float refImg_sum_II[N];
+	__shared__ float refImg_I[N * 3 * WINDOWSIZES];
+	__shared__ float depth_current_array[N];
+	__shared__ float depth_new[N];
+	__shared__ curandState localState[N];
+	localState[threadId] = *(randState + col);
+
+	float rowMinusHalfwindowPlusHalf = 0.0f - (WINDOWSIZES-1)/2 + 0.5f;
+	float colMinusHalfwindowPlusHalf = (float)col - (WINDOWSIZES-1)/2 + 0.5f;
+
+	for(int row = 0; row < refImageHeight; ++row)
+	{
+		readImageIntoSharedMemory<WINDOWSIZES>(refImg_I, row, col, threadId, true);
+		if(col < refImageWidth)
+		{
+			refImg_sum_I[threadId] = accessPitchMemory(refImgI, refImgPitch, row, col);
+			refImg_sum_II[threadId] = accessPitchMemory(refImgII, refImgPitch, row, col);			
+			depth_current_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col);
+			float oldCost = accessPitchMemory(matchCost, SPMapPitch, row,col);
+			float newCost;
+			float bestDepth;
+
+			for(int i = 0; i < 10; i++)
+			{
+				newCost = 0;
+				// randomly change the depth:
+				depth_new[threadId] = depth_current_array[threadId] + curand_normal(&localState[threadId]) * 0.05f ;
+				depth_new[threadId] = depth_new[threadId] <= 0? depth_current_array[threadId] : depth_new[threadId];
+
+				uchar imageId;
+				for(int j = 0; j < numOfSamples; j++)
+				{
+					imageId = accessPitchMemory(usedImgsId, usedImgsIdPitchData, j * refImageHeight + row, col);
+					newCost += computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, static_cast<int>(imageId), rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_new[threadId], true, (WINDOWSIZES-1)/2, refImageWidth, refImageHeight);
+
+				}
+				newCost /= numOfSamples;
+
+				if(newCost < oldCost)
+				{
+					bestDepth = depth_new[threadId];
+					oldCost = newCost;
+				}
+			}
+			writePitchMemory(depthMap, depthMapPitch, row, col, bestDepth);
+			++rowMinusHalfwindowPlusHalf;
+		}
+	}	*(randState + col) = localState[threadId];
+}
 
 template<int WINDOWSIZES>
 __global__ void computeAllCostGivenDepth(float *matchCost, int SPMapPitch, float *refImg, float *refImgI, float *refImgII, int refImgPitch, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch,
@@ -969,7 +980,7 @@ __global__ void topToDown(float *matchCost, float *refImg, float *refImgI, float
 template<int WINDOWSIZES>
 __global__ void downToTop(float *matchCost, float *refImg, float *refImgI, float *refImgII, int refImgPitch, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
 	int numOfSamples, curandState *randState, int randStatePitch, float depthRangeNear, float depthRangeFar, int halfWindowSize, bool isRotated, unsigned int _numOfTargetImages, float SPMAlphaSquare,
-	uchar *usedImgsID, unsigned usedImgsIDPitchData )
+	uchar *usedImgsID, int usedImgsIDPitchData )
 {
 	int col = blockDim.x * blockIdx.x + threadIdx.x;
 	int threadId = threadIdx.x;
