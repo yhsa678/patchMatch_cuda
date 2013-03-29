@@ -36,6 +36,9 @@ void main(int argc, char *argv[])
 	int numOfIterations;
 	int gpuId;
 	std::string outputFileName;
+	float orientationX;
+	float orientationZ;
+
 	try
 	{
 		boost::property_tree::ptree pt;
@@ -53,12 +56,24 @@ void main(int argc, char *argv[])
 		if(fRange)
 			farRange = fRange.get();
 
-		boost::optional<float> gpuIdOptional = pt.get_optional<float>("params.gpuId");
+		boost::optional<int> gpuIdOptional = pt.get_optional<int>("params.gpuId");
 		if(gpuIdOptional)
 			gpuId = gpuIdOptional.get();
 		else
 			gpuId = -1;
 
+		boost::optional<float> orientationOptionalX = pt.get_optional<float>("params.orientationX");
+		boost::optional<float> orientationOptionalZ = pt.get_optional<float>("params.orientationZ");
+		if (orientationOptionalX && orientationOptionalZ)
+		{
+			orientationX = orientationOptionalX.get();
+			orientationZ = orientationOptionalZ.get();
+		}
+		else
+		{
+			orientationX = 0.0f;
+			orientationZ = 1.0f;
+		}
 
 		refImageId = pt.get<int>("params.refImageId");
 		halfWindowSize = pt.get<int>("params.halfWindowSize");
@@ -105,7 +120,7 @@ void main(int argc, char *argv[])
 		farRange = depthRange[refImageId].second;
 	}	
 
-	PatchMatch pm(allImage, nearRange, farRange, halfWindowSize, blockDim_x, blockDim_y, refImageId, numOfSamples, SPMAlpha, gaussianSigma, numOfIterations );
+	PatchMatch pm(allImage, nearRange, farRange, halfWindowSize, blockDim_x, blockDim_y, refImageId, numOfSamples, SPMAlpha, gaussianSigma, numOfIterations , orientationX, orientationZ);
 	pm.runPatchMatch();
 
 // save the file:

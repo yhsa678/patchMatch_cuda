@@ -127,10 +127,10 @@ void PatchMatch::copyData(const std::vector<Image> &allImage, int referenceId)
 	}
 } 
 
-PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId, int numOfSamples, float SPMAlpha, float gaussianSigma, int numOfIterations): 
+PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float farRange, int halfWindowSize, int blockDim_x, int blockDim_y, int refImageId, int numOfSamples, float SPMAlpha, float gaussianSigma, int numOfIterations, float orientationX, float orientationZ): 
 	_imageDataBlock(NULL), _allImages_cudaArrayWrapper(NULL), _nearRange(nearRange), _farRange(farRange), _halfWindowSize(halfWindowSize), _blockDim_x(blockDim_x), _blockDim_y(blockDim_y), _refImageId(refImageId),
 		_depthMap(NULL), _SPMap(NULL), _psngState(NULL), _depthMapT(NULL), _SPMapT(NULL), _numOfSamples(numOfSamples), _refImage(NULL), _refImageT(NULL), _SPMAlpha(SPMAlpha), _gaussianSigma(gaussianSigma),
-		_numOfIterations(numOfIterations)
+		_numOfIterations(numOfIterations), _orientationX(orientationX), _orientationZ(orientationZ)
 {
 	_numOfTargetImages = static_cast<int>(allImage.size()) - 1;
 	if(_numOfTargetImages == 0)
@@ -140,7 +140,7 @@ PatchMatch::PatchMatch( std::vector<Image> &allImage, float nearRange, float far
 	}
 	// using reference image id to update H1 and H2 for each image
 	for(unsigned int i = 0; i < allImage.size(); i++)
-		allImage[i].init_relative( allImage[refImageId] );
+		allImage[i].init_relative( allImage[refImageId], _orientationX, _orientationZ );
 
 	// find maximum size of each dimension
 	copyData(allImage, _refImageId);

@@ -1,13 +1,14 @@
 #include "Image.h"
 #include "opencv/cv.h"
 
-void Image::init_relative(const Image &refImg)
+void Image::init_relative(const Image &refImg, float orientationX, float orientationZ)
 {
 	_relative_R = _R * refImg._inverseR;
 	_relative_T = _R * (_C - refImg._C);
 
 	_H1 = _K * _relative_R * refImg._inverseK;
-	cv::Mat normalVector = (cv::Mat_<float>(1,3) << 0, 0, 1);
+	//cv::Mat normalVector = (cv::Mat_<float>(1,3) << 0, 0, 1);
+	cv::Mat normalVector = (cv::Mat_<float>(1,3) << orientationX, 0, orientationZ);
 	_H2 = _K * _relative_T * normalVector * refImg._inverseK;
 }
 

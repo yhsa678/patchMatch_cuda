@@ -26,7 +26,7 @@ class Image{
 
 		void updateCamParam(float *K, float *R, float *T, std::string imageFileName);
 		void updateCamParam(float *K, float *R, float *T, const cv::Mat &image);
-		void init_relative(const Image &refImg);
+		void init_relative(const Image &refImg, float orientationX, float orientationZ);
 
 		cv::Mat _imageData;
 
