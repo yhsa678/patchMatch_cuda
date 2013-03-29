@@ -32,7 +32,7 @@ texture<float, cudaTextureType2DLayered, cudaReadModeElementType> transformTextu
 
 #define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
 #define SET_BIT(var,pos)( (var) |= (1 << (pos) ))
-#define N 64 
+#define N 32
 
 void PatchMatch::computeCUDAConfig(int width, int height, int blockDim_x, int blockDim_y)
 {
