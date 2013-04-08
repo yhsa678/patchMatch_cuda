@@ -24,6 +24,10 @@ template<int WINDOWSIZES>
 __global__ void computeAllCostGivenDepth(float *matchCost, int SPMapPitch, float *refImg, float *refImgI, float *refImgII, int refImgPitch, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch,
 	unsigned int _numOfTargetImages);
 
+template<int WINDOWSIZES>
+__global__ void depthRefinement(float *matchCost, int SPMapPitch, float *refImg, float *refImgI, float *refImgII, int refImgPitch, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch,
+	unsigned int _numOfTargetImages, uchar *usedImgsId, int usedImgsIdPitchData,  int numOfSamples, curandState *randState, int randStatePitch );
+
 texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> allImgsTexture;
 texture<uchar, cudaTextureType2DLayered, cudaReadModeNormalizedFloat> refImgTexture;
 texture<float, cudaTextureType2DLayered, cudaReadModeElementType> transformTexture; 
@@ -326,7 +330,7 @@ template<int WINDOWSIZES> void PatchMatch::run()
 //-----------------------------------------------------------
 		std::cout<< "Iteration " << i << " starts" << std::endl;
 		if(i == 0)
-			numOfSamples = 1; // ****
+			numOfSamples = 3; // ****
 		else
 			numOfSamples = _numOfSamples;
 		
@@ -392,9 +396,16 @@ template<int WINDOWSIZES> void PatchMatch::run()
 		t.stopRecord();
 
 	}
+	std::cout<< "ended"<<std::endl;
 
 	// do refinement:
+//	depthRefinement<WINDOWSIZES><<<_gridSize, _blockSize>>>( _matchCost->_array2D, _matchCost->_pitchData,_refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D , 
+//	_refImage->_refImage_sum_I->_pitchData, _depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
+//	_numOfTargetImages, _usedImgsID->_array2D, _usedImgsID->_pitchData, numOfSamples, _psngState->_array2D, _psngState->_pitchData);
 
+
+
+	//unsigned int _numOfTargetImages, uchar *usedImgsId, int usedImgsIdPitchData,  int numOfSamples, curandState *randState, int randStatePitch )
 
 	
 	/*for(int i = 0; i< _numOfTargetImages; i++)
@@ -591,13 +602,16 @@ inline __device__ float computeNCC(const int &threadId, const float *refImg_I, c
 	//	* (sum_Iprime_Iprime - sum_Iprime * sum_Iprime/ numOfPixels); 
 	//float cost = ((refImg_sum_II[threadId]*numOfPixels - refImg_sum_I[threadId] * refImg_sum_I[threadId]) 
 	//	* (sum_Iprime_Iprime*numOfPixels - sum_Iprime * sum_Iprime)); 
-	if(sum_Iprime_Iprime == 0.0f)
-		return 2.0f;
+
+//	if(sum_Iprime_Iprime == 0.0f)
+//		return 2.0f;
 
 	float cost1 = refImg_sum_II[threadId] - refImg_sum_I[threadId] * refImg_sum_I[threadId]/ (float)numOfPixels;
 	float cost2 = sum_Iprime_Iprime - sum_Iprime * sum_Iprime/ (float)numOfPixels; 
 	cost1 = cost1 < 0.00001? 0.0f : cost1;
 	cost2 = cost2 < 0.00001? 0.0f : cost2;
+	if(threadId == 3)
+		printf("cost1: %f, cost2: %f, threadId: %d\n ", cost1, cost2, threadId);
 	float cost = sqrt(cost1 * cost2);
 	if(cost == 0)
 		return 1.0f; // very small color consistency
@@ -605,6 +619,14 @@ inline __device__ float computeNCC(const int &threadId, const float *refImg_I, c
 	{
 		//float norminator = sum_I_Iprime * numOfPixels - refImg_sum_I[threadId] * sum_Iprime;
 		//return 1 -  abs(norminator)/(cost);
+		if(threadId == 3)
+		{
+			printf("sqrt(cost1 * cost2): %f\n", cost);
+			printf("sum_I_Iprime: %f\n", sum_I_Iprime);
+			printf("refImg_sum_I: %f\n", refImg_sum_I[threadId]);
+			printf("sum_Iprime: %f\n", sum_Iprime);
+			printf("number of pixels: %i\n", numOfPixels);
+		}
 		cost = 1 - (sum_I_Iprime -  refImg_sum_I[threadId] * sum_Iprime/ (float)numOfPixels )/(cost);
 		return cost;
 	}
@@ -741,35 +763,39 @@ __global__ void depthRefinement(float *matchCost, int SPMapPitch, float *refImg,
 			refImg_sum_II[threadId] = accessPitchMemory(refImgII, refImgPitch, row, col);			
 			depth_current_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col);
 			float oldCost = accessPitchMemory(matchCost, SPMapPitch, row,col);
+		
 			float newCost;
 			float bestDepth;
 
-			for(int i = 0; i < 10; i++)
+			for(int i = 0; i < 1; i++)
 			{
 				newCost = 0;
 				// randomly change the depth:
-				depth_new[threadId] = depth_current_array[threadId] + curand_normal(&localState[threadId]) * 0.05f ;
-				depth_new[threadId] = depth_new[threadId] <= 0? depth_current_array[threadId] : depth_new[threadId];
+				//depth_new[threadId] = depth_current_array[threadId] + curand_normal(&localState[threadId]) * 0.05f ;
+				depth_new[threadId] = depth_current_array[threadId];
+				//depth_new[threadId] = depth_new[threadId] <= 0? depth_current_array[threadId] : depth_new[threadId];
 
 				uchar imageId;
 				for(int j = 0; j < numOfSamples; j++)
 				{
 					imageId = accessPitchMemory(usedImgsId, usedImgsIdPitchData, j * refImageHeight + row, col);
-					newCost += computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, static_cast<int>(imageId), rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_new[threadId], true, (WINDOWSIZES-1)/2, refImageWidth, refImageHeight);
-
+					newCost += computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, static_cast<int>(imageId), rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_new[threadId], true, (WINDOWSIZES-1)/2, refImageWidth, refImageHeight, 1.0f);
 				}
 				newCost /= numOfSamples;
 
-				if(newCost < oldCost)
+				/*if(newCost < oldCost)
 				{
 					bestDepth = depth_new[threadId];
 					oldCost = newCost;
-				}
+				}*/
 			}
+			printf("costNew: %f, costOld: %f\n", newCost, oldCost);
 			writePitchMemory(depthMap, depthMapPitch, row, col, bestDepth);
 			++rowMinusHalfwindowPlusHalf;
+
 		}
-	}	*(randState + col) = localState[threadId];
+	}
+	*(randState + col) = localState[threadId];
 }
 
 template<int WINDOWSIZES>
@@ -808,6 +834,9 @@ __global__ void computeAllCostGivenDepth(float *matchCost, int SPMapPitch, float
 			{
 				// compute cost for current depth
 				cost1stRow = computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_current_array[threadId], true, (WINDOWSIZES-1)/2, refImageWidth, refImageHeight, scale);
+				if(cost1stRow>2.0f)
+					printf("cost1stRow: %f\n", cost1stRow);
+
 				writePitchMemory(matchCost, SPMapPitch,  row + imageId * refImageHeight, col, cost1stRow);
 			}
 			++rowMinusHalfwindowPlusHalf;
@@ -1170,6 +1199,9 @@ __global__ void downToTop(float *matchCost, float *refImg, float *refImgI, float
 			// find the minimum cost id, and then put cost into global memory 
 			numOfTestedSamples = 1.0f/numOfTestedSamples;
 			cost[0] *= numOfTestedSamples; cost[1] *= numOfTestedSamples; cost[2] *= numOfTestedSamples;
+
+			/*if(cost[0] > 2 || cost[1] >2 || cost[2] >2)
+				printf("cost[0]: %f, cost[1]: %f, cost[2]: %f\n", cost[0], cost[1], cost[2]);*/
 		
 			int idx = findMinCost(cost);
 			float bestDepth = depth_array[threadId + N * idx];
