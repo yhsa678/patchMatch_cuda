@@ -9,7 +9,7 @@
 #define FIX_STATE_PROB (0.999f)
 #define CHANGE_STATE_PROB (1.0f - FIX_STATE_PROB)
 
-#define HANDLE_BOUNDARY
+//#define HANDLE_BOUNDARY
 
 template<int WINDOWSIZES>
 __global__ void topToDown( float *, float *, float *, float *, int, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
@@ -806,13 +806,13 @@ __global__ void topToDown(float *matchCost, float *refImg, float *refImgI, float
 				float zn1 = (1.0f - normalizedSPMap[imageId * N + threadId]) * (1.0f- accessPitchMemory(SPMap, SPMapPitch, imageId * refImageHeight + row, col));
 				normalizedSPMap[imageId * N + threadId] = zn0/(zn0+zn1);
 			}
-			for(int i = 1; i<_numOfTargetImages; i++)		
+		//	for(int i = 1; i<_numOfTargetImages; i++)		
 				//forwardMessageTemp[i * N + threadId] += forwardMessageTemp[(i-1) * N + threadId ];
-				normalizedSPMap[i * N + threadId] += normalizedSPMap[(i-1) * N + threadId ];
+		//		normalizedSPMap[i * N + threadId] += normalizedSPMap[(i-1) * N + threadId ];
 			// normalize
-			for(int i = 0; i<_numOfTargetImages; i++)
+		//	for(int i = 0; i<_numOfTargetImages; i++)
 				//forwardMessageTemp[i * N + threadId] /= forwardMessageTemp[N * (_numOfTargetImages -1) + threadId];			
-				normalizedSPMap[i * N + threadId] /= normalizedSPMap[N * (_numOfTargetImages -1) + threadId];			
+		//		normalizedSPMap[i * N + threadId] /= normalizedSPMap[N * (_numOfTargetImages -1) + threadId];			
 
 			++rowMinusHalfwindowPlusHalf;
 			refImg_sum_I[threadId] = accessPitchMemory(refImgI, refImgPitch, row, col);
@@ -823,46 +823,50 @@ __global__ void topToDown(float *matchCost, float *refImg, float *refImgI, float
 				selectedImages[threadId + i * N] = 0;	// initialized to false
 			//---------------------------------
 			// draw samples and set the bit to 0
-			float numOfTestedSamples = 0;
+			//float numOfTestedSamples = 0;
 			float cost[3] = {0.0f};
 			// here it is better to generate a random depthmap
 			randDepth[threadId] = curand_uniform(&localState[threadId]) * (depthRangeFar - depthRangeNear) + depthRangeNear;
 
-			unsigned int pos;
-			for(int j = 0; j < numOfSamples; j++)
+			//unsigned int pos;
+			//for(int j = 0; j < numOfSamples; j++)
+			for(int k = 0; k < _numOfTargetImages; k++)
 			{
-				float randNum = curand_uniform(&localState[threadId]);
+				//float randNum = curand_uniform(&localState[threadId]);
 
-				int imageId = -1;				
-				for(unsigned int i = 0; i < _numOfTargetImages; i++)
-				{
-					if(randNum <= normalizedSPMap[i * N + threadId ])
-					//if(randNum <= forwardMessageTemp[i * N + threadId ])
-					{
-						unsigned int &stateByte = selectedImages[(i>>5) * N + threadId];
-						pos = i - (sizeof(unsigned int) << 3) * (i>>5);  //(i - i /32 * numberOfBitsPerInt)
-						//if(!CHECK_BIT(stateByte,pos))
-						{
-							imageId = i;
-							numOfTestedSamples++;
-						}
-						// then set the bit
-						SET_BIT(stateByte, pos);	// 
-						break;
-					}
-				}
+				//int imageId = -1;				
+				//for(unsigned int i = 0; i < _numOfTargetImages; i++)
+				//{
+				//	if(randNum <= normalizedSPMap[i * N + threadId ])
+				//	//if(randNum <= forwardMessageTemp[i * N + threadId ])
+				//	{
+				//		//unsigned int &stateByte = selectedImages[(i>>5) * N + threadId];
+				//		//pos = i - (sizeof(unsigned int) << 3) * (i>>5);  //(i - i /32 * numberOfBitsPerInt)
+				//		//if(!CHECK_BIT(stateByte,pos))
+				//		{
+				//			imageId = i;
+				//		//	numOfTestedSamples++;
+				//		}
+				//		// then set the bit 
+				//		//SET_BIT(stateByte, pos);	// 
+				//		break;
+				//	}
+				//}
 				// image id is i( id != -1). Test the id using NCC, with 3 different depth. 				
 				//if(imageId != -1)
+				int imageId = k;
 				{
-					cost[0] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight);			// accumulate the cost
-					cost[1] += accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col);
-					cost[2] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight);	
+					//float x = normalizedSPMap[imageId * N + threadId ];
+					//printf("normalizedSPMap: %f\n", x);
+					cost[0] += normalizedSPMap[imageId * N + threadId ]*  pow(computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight),2);			// accumulate the cost
+					cost[1] += normalizedSPMap[imageId * N + threadId ]* pow(accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col),2);
+					cost[2] += normalizedSPMap[imageId * N + threadId ]* pow(computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight),2);	
 				}
 			}	
 			// find the minimum cost id, and then put cost into global memory 
 			//cost[0] /= numOfTestedSamples; cost[1] /= numOfTestedSamples; cost[2] /= numOfTestedSamples;
-			numOfTestedSamples = 1.0f/numOfTestedSamples;
-			cost[0] *= numOfTestedSamples; cost[1] *= numOfTestedSamples; cost[2] *= numOfTestedSamples;
+		//	numOfTestedSamples = 1.0f/numOfTestedSamples;
+		//	cost[0] *= numOfTestedSamples; cost[1] *= numOfTestedSamples; cost[2] *= numOfTestedSamples;
 
 			int idx = findMinCost(cost);
 			float bestDepth = depth_array[threadId + N * idx];
@@ -985,13 +989,13 @@ __global__ void downToTop(float *matchCost, float *refImg, float *refImgI, float
 				//forwardMessageTemp[imageId * N + threadId] = zn0/(zn0+zn1);
 				normalizedSPMap[imageId * N + threadId] = zn0/(zn0+zn1);
 			}
-			for(int i = 1; i<_numOfTargetImages; i++)		
+		//	for(int i = 1; i<_numOfTargetImages; i++)		
 				//forwardMessageTemp[i * N + threadId] += forwardMessageTemp[(i-1) * N + threadId ];
-				normalizedSPMap[i * N + threadId] += normalizedSPMap[(i-1) * N + threadId ];
+		//		normalizedSPMap[i * N + threadId] += normalizedSPMap[(i-1) * N + threadId ];
 			// normalize
-			for(int i = 0; i<_numOfTargetImages; i++)
+		//	for(int i = 0; i<_numOfTargetImages; i++)
 				//forwardMessageTemp[i * N + threadId] /= forwardMessageTemp[N * (_numOfTargetImages -1) + threadId];			
-				normalizedSPMap[i * N + threadId] /= normalizedSPMap[N * (_numOfTargetImages -1) + threadId];			
+		//		normalizedSPMap[i * N + threadId] /= normalizedSPMap[N * (_numOfTargetImages -1) + threadId];			
 
 
 			--rowMinusHalfwindowPlusHalf;
@@ -1004,44 +1008,46 @@ __global__ void downToTop(float *matchCost, float *refImg, float *refImgI, float
 			//---------------------------------
 
 			// draw samples and set the bit to 0
-			float numOfTestedSamples = 0.0f;
+			//float numOfTestedSamples = 0.0f;
 			float cost[3] = {0.0f};
 
 			// here it is better to generate a random depthmap
 			randDepth[threadId] = curand_uniform(&localState[threadId]) * (depthRangeFar - depthRangeNear) + depthRangeNear;
-			for(int j = 0; j < numOfSamples; j++)
+			//for(int j = 0; j < numOfSamples; j++)
+			for(int k = 0; k < _numOfTargetImages; k++)
 			{
-				float randNum = curand_uniform(&localState[threadId]); 
+				//float randNum = curand_uniform(&localState[threadId]); 
 
-				int imageId = -1;				
-				for(int i = 0; i < _numOfTargetImages; i++)
-				{
-					if(randNum <= normalizedSPMap[i * N + threadId ])
-					//if(randNum <= forwardMessageTemp[i * N + threadId ])
-					{
-						unsigned int &stateByte = selectedImages[(i>>5) * N + threadId];
-						unsigned int pos = i - (sizeof(int) << 3) * (i>>5);  //(i - i /32 * numberOfBitsPerInt)
-						//if(!CHECK_BIT(stateByte,pos))
-						{
-							imageId = i;
-							numOfTestedSamples++;
-						}
-						// then set the bit
-						SET_BIT(stateByte, pos);	// 
-						break;
-					}
-				}
+				//int imageId = -1;				
+				//for(int i = 0; i < _numOfTargetImages; i++)
+				//{
+				//	if(randNum <= normalizedSPMap[i * N + threadId ])
+				//	//if(randNum <= forwardMessageTemp[i * N + threadId ])
+				//	{
+				//		//unsigned int &stateByte = selectedImages[(i>>5) * N + threadId];
+				//		//unsigned int pos = i - (sizeof(int) << 3) * (i>>5);  //(i - i /32 * numberOfBitsPerInt)
+				//		//if(!CHECK_BIT(stateByte,pos))
+				//		//{
+				//			imageId = i;
+				//		//	numOfTestedSamples++;
+				//		//}
+				//		// then set the bit
+				//		//SET_BIT(stateByte, pos);	// 
+				//		break;
+				//	}
+				//}
 				// image id is i( id != -1). Test the id using NCC, with 3 different depth. 				
 				//if(imageId != -1)
+				int imageId = k;
 				{
-					cost[0] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight);			// accumulate the cost
-					cost[1] += accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col);
-					cost[2] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight);
+					cost[0] += normalizedSPMap[imageId * N + threadId ] * pow( computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight),2);			// accumulate the cost
+					cost[1] += normalizedSPMap[imageId * N + threadId ] * pow(accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col),2);
+					cost[2] += normalizedSPMap[imageId * N + threadId ] * pow( computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight),2);
 				}
 			}	
 			// find the minimum cost id, and then put cost into global memory 
-			numOfTestedSamples = 1.0f/numOfTestedSamples;
-			cost[0] *= numOfTestedSamples; cost[1] *= numOfTestedSamples; cost[2] *= numOfTestedSamples;
+		//	numOfTestedSamples = 1.0f/numOfTestedSamples;
+		//	cost[0] *= numOfTestedSamples; cost[1] *= numOfTestedSamples; cost[2] *= numOfTestedSamples;
 		
 			int idx = findMinCost(cost);
 			float bestDepth = depth_array[threadId + N * idx];
