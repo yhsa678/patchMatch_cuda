@@ -344,7 +344,7 @@ template<int WINDOWSIZES> void PatchMatch::run()
 			computeAllCostGivenDepth<WINDOWSIZES><<<_gridSize, _blockSize>>>(_matchCostT->_array2D, _matchCostT->_pitchData ,_refImageT->_refImageData->_array2D, _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D,
 			_refImageT->_refImage_sum_I->_pitchData, _depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, _numOfTargetImages);
 			CudaCheckError();
-		}		
+		}
 		isRotated = true;
 		topToDown<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(_matchCostT->_array2D, _refImageT->_refImageData->_array2D,  _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D, _refImageT->_refImage_sum_I->_pitchData,
 			_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
@@ -394,14 +394,13 @@ template<int WINDOWSIZES> void PatchMatch::run()
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare, NULL, 0);
 		delete _SPMap; _SPMap = NULL;
 		t.stopRecord();
-
 	}
 	std::cout<< "ended"<<std::endl;
 
 	// do refinement:
-//	depthRefinement<WINDOWSIZES><<<_gridSize, _blockSize>>>( _matchCost->_array2D, _matchCost->_pitchData,_refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D , 
-//	_refImage->_refImage_sum_I->_pitchData, _depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
-//	_numOfTargetImages, _usedImgsID->_array2D, _usedImgsID->_pitchData, numOfSamples, _psngState->_array2D, _psngState->_pitchData);
+	depthRefinement<WINDOWSIZES><<<_gridSize, _blockSize>>>( _matchCost->_array2D, _matchCost->_pitchData,_refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D , 
+	_refImage->_refImage_sum_I->_pitchData, _depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
+	_numOfTargetImages, _usedImgsID->_array2D, _usedImgsID->_pitchData, numOfSamples, _psngState->_array2D, _psngState->_pitchData);
 
 
 
@@ -554,12 +553,17 @@ inline __device__ float computeNCC(const int &threadId, const float *refImg_I, c
 					Iprime = tex2DLayered(allImgsTexture, col_prime/z + 0.5f, row_prime/z + 0.5f, imageId); // textures are not rotated
 					sum_Iprime_Iprime_row += (Iprime * Iprime);
 					sum_Iprime_row += Iprime;
-					sum_I_Iprime_row += (Iprime * refImg_I[refImg_I_Ind++]);
+					//sum_I_Iprime_row += (Iprime * refImg_I[refImg_I_Ind++]);
+					sum_I_Iprime_row += (Iprime * refImg_I[refImg_I_Ind]);
+					//if(threadId == 0)
+					//	printf("Iprime * refImg_I[refImg_I_Ind]: %f \n", Iprime * refImg_I[refImg_I_Ind] );
+					
 					numOfPixels++;
 				}
 #ifdef HANDLE_BOUNDARY
 				++localColMinusHalfwindowPlusHalf;
 #endif
+				++refImg_I_Ind;
 				if(!isRotated)
 				{
 					z += transform[6];
@@ -610,8 +614,8 @@ inline __device__ float computeNCC(const int &threadId, const float *refImg_I, c
 	float cost2 = sum_Iprime_Iprime - sum_Iprime * sum_Iprime/ (float)numOfPixels; 
 	cost1 = cost1 < 0.00001? 0.0f : cost1;
 	cost2 = cost2 < 0.00001? 0.0f : cost2;
-	if(threadId == 3)
-		printf("cost1: %f, cost2: %f, threadId: %d\n ", cost1, cost2, threadId);
+	/*if(threadId == 3)
+		printf("cost1: %f, cost2: %f, threadId: %d\n ", cost1, cost2, threadId);*/
 	float cost = sqrt(cost1 * cost2);
 	if(cost == 0)
 		return 1.0f; // very small color consistency
@@ -619,15 +623,20 @@ inline __device__ float computeNCC(const int &threadId, const float *refImg_I, c
 	{
 		//float norminator = sum_I_Iprime * numOfPixels - refImg_sum_I[threadId] * sum_Iprime;
 		//return 1 -  abs(norminator)/(cost);
-		if(threadId == 3)
-		{
+		//if(threadId == 3)
+		/*{			 
+			printf("cost1, cost2: %f %f\n", cost1, cost2);
+			printf("refImg_sum_II[threadId]: %f\n", refImg_sum_II[threadId]); 
 			printf("sqrt(cost1 * cost2): %f\n", cost);
 			printf("sum_I_Iprime: %f\n", sum_I_Iprime);
 			printf("refImg_sum_I: %f\n", refImg_sum_I[threadId]);
 			printf("sum_Iprime: %f\n", sum_Iprime);
 			printf("number of pixels: %i\n", numOfPixels);
-		}
-		cost = 1 - (sum_I_Iprime -  refImg_sum_I[threadId] * sum_Iprime/ (float)numOfPixels )/(cost);
+		}*/
+		//cost = refImg_sum_I[threadId] * sum_Iprime/ (float)numOfPixels;
+		float x = sum_I_Iprime -  refImg_sum_I[threadId] * sum_Iprime/ (float)numOfPixels;
+		//cost = 1 - (sum_I_Iprime -  refImg_sum_I[threadId] * sum_Iprime/ (float)numOfPixels )/(cost);
+		cost = 1 - x/cost;
 		return cost;
 	}
 }
