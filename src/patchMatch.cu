@@ -393,15 +393,16 @@ template<int WINDOWSIZES> void PatchMatch::run()
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare, NULL, 0);
 		delete _SPMap; _SPMap = NULL;
-		t.stopRecord();
+		t.stopRecord(); 
 	}
 	std::cout<< "ended"<<std::endl;
 
 	// do refinement:
+	CudaCheckError();
 	depthRefinement<WINDOWSIZES><<<_gridSize, _blockSize>>>( _matchCost->_array2D, _matchCost->_pitchData,_refImage->_refImageData->_array2D, _refImage->_refImage_sum_I->_array2D, _refImage->_refImage_sum_II->_array2D , 
-	_refImage->_refImage_sum_I->_pitchData, _depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
-	_numOfTargetImages, _usedImgsID->_array2D, _usedImgsID->_pitchData, numOfSamples, _psngState->_array2D, _psngState->_pitchData);
-
+		_refImage->_refImage_sum_I->_pitchData, _depthMap->getWidth(), _depthMap->getHeight(), _depthMap->_array2D, _depthMap->_pitchData, 
+		_numOfTargetImages, _usedImgsID->_array2D, _usedImgsID->_pitchData, numOfSamples, _psngState->_array2D, _psngState->_pitchData);
+	CudaCheckError();
 
 
 	//unsigned int _numOfTargetImages, uchar *usedImgsId, int usedImgsIdPitchData,  int numOfSamples, curandState *randState, int randStatePitch )
@@ -758,53 +759,87 @@ __global__ void depthRefinement(float *matchCost, int SPMapPitch, float *refImg,
 	__shared__ float depth_current_array[N];
 	__shared__ float depth_new[N];
 	__shared__ curandState localState[N];
-	localState[threadId] = *(randState + col);
-
+	float scale;
+	if(col < refImageWidth)
+	{
+		localState[threadId] = *(randState + col);
+		scale = orientation[0] * (inverseK[0] * (col + 0.5) + inverseK[1] ) 
+				  + orientation[1] * (inverseK[2] * (0.5) + inverseK[3])
+				  + orientation[2];
+	} 
 	float rowMinusHalfwindowPlusHalf = 0.0f - (WINDOWSIZES-1)/2 + 0.5f;
 	float colMinusHalfwindowPlusHalf = (float)col - (WINDOWSIZES-1)/2 + 0.5f;
 
+	
+
 	for(int row = 0; row < refImageHeight; ++row)
 	{
-		readImageIntoSharedMemory<WINDOWSIZES>(refImg_I, row, col, threadId, true);
+		if(row == refImageHeight - 1)
+			continue;
+
+		readImageIntoSharedMemory<WINDOWSIZES>(refImg_I, row, col, threadId, false);
+
 		if(col < refImageWidth)
 		{
 			refImg_sum_I[threadId] = accessPitchMemory(refImgI, refImgPitch, row, col);
 			refImg_sum_II[threadId] = accessPitchMemory(refImgII, refImgPitch, row, col);			
-			depth_current_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col);
-			float oldCost = accessPitchMemory(matchCost, SPMapPitch, row,col);
-		
-			float newCost;
-			float bestDepth;
+			depth_current_array[threadId] = accessPitchMemory(depthMap, depthMapPitch, row, col);	
 
-			for(int i = 0; i < 1; i++)
-			{
-				newCost = 0;
+			
+			
+			float bestDepth = depth_current_array[threadId];
+			float oldCost = 0;
+			
+			for(int i = 0; i < 30; i++)
+			{				
+				float newCost = 0;				 
+
 				// randomly change the depth:
-				//depth_new[threadId] = depth_current_array[threadId] + curand_normal(&localState[threadId]) * 0.05f ;
-				depth_new[threadId] = depth_current_array[threadId];
-				//depth_new[threadId] = depth_new[threadId] <= 0? depth_current_array[threadId] : depth_new[threadId];
+				depth_new[threadId] = depth_current_array[threadId] + /*curand_uniform(&localState[threadId]) **/ 0.001f * float(i - 15) ;
+				//if(col == 20 && row < 3)
+				//	printf("depth_new[threadId]: %f, depth_current_array[threadId]: %f\n", depth_new[threadId], depth_current_array[threadId] );
 
+				//depth_new[threadId] = depth_current_array[threadId];
+				depth_new[threadId] = depth_new[threadId] <= 0? depth_current_array[threadId] : depth_new[threadId];
+				
 				uchar imageId;
 				for(int j = 0; j < numOfSamples; j++)
 				{
 					imageId = accessPitchMemory(usedImgsId, usedImgsIdPitchData, j * refImageHeight + row, col);
-					newCost += computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, static_cast<int>(imageId), rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_new[threadId], true, (WINDOWSIZES-1)/2, refImageWidth, refImageHeight, 1.0f);
+					if(static_cast<int>(imageId) >= _numOfTargetImages) 
+						printf("imageId: %d\n", static_cast<int>(imageId));
+
+					newCost += computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, static_cast<int>(imageId), rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_new[threadId], false, (WINDOWSIZES-1)/2, refImageWidth, refImageHeight, scale);
+					if(i == 0)
+						oldCost += accessPitchMemory(matchCost, SPMapPitch, static_cast<int>(imageId) * refImageHeight + row, col);
+					//cost[0] = accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col);
 				}
 				newCost /= numOfSamples;
+				if(i == 0)
+					oldCost /= numOfSamples; 
 
-				/*if(newCost < oldCost)
+				//if(col == 20 && row < 3)
+				//	printf("newCost: %f, oldCost: %f\n", newCost, oldCost );
+
+				if(newCost < oldCost)
 				{
 					bestDepth = depth_new[threadId];
 					oldCost = newCost;
-				}*/
+				}
 			}
-			printf("costNew: %f, costOld: %f\n", newCost, oldCost);
-			writePitchMemory(depthMap, depthMapPitch, row, col, bestDepth);
-			++rowMinusHalfwindowPlusHalf;
+			if(col == 20 && row == 0)
+				printf("bestDepth: %f\n", bestDepth);
+			
+			//if(col == 15) 
+			//	printf("costNew: %f, costOld: %f\n", newCost, oldCost);
 
+			writePitchMemory(depthMap, depthMapPitch, row, col, bestDepth);
+			++rowMinusHalfwindowPlusHalf; 
+			scale += orientation[1] * inverseK[2];
 		}
 	}
-	*(randState + col) = localState[threadId];
+	if(col < refImageWidth)
+		*(randState + col) = localState[threadId];
 }
 
 template<int WINDOWSIZES>
@@ -843,8 +878,8 @@ __global__ void computeAllCostGivenDepth(float *matchCost, int SPMapPitch, float
 			{
 				// compute cost for current depth
 				cost1stRow = computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_current_array[threadId], true, (WINDOWSIZES-1)/2, refImageWidth, refImageHeight, scale);
-				if(cost1stRow>2.0f)
-					printf("cost1stRow: %f\n", cost1stRow);
+				//if(cost1stRow>2.0f)
+				//	printf("cost1stRow: %f\n", cost1stRow);
 
 				writePitchMemory(matchCost, SPMapPitch,  row + imageId * refImageHeight, col, cost1stRow);
 			}
