@@ -9,7 +9,7 @@
 #define FIX_STATE_PROB (0.999f)
 #define CHANGE_STATE_PROB (1.0f - FIX_STATE_PROB)
 
-#define HANDLE_BOUNDARY
+//#define HANDLE_BOUNDARY
 
 template<int WINDOWSIZES>
 __global__ void topToDown( float *, float *, float *, float *, int, int refImageWidth, int refImageHeight, float *depthMap, int depthMapPitch, float *SPMap, int SPMapPitch,
@@ -516,12 +516,14 @@ inline __device__ float computeNCC(const int &threadId, const float *refImg_I, c
 					Iprime = tex2DLayered(allImgsTexture, col_prime/z + 0.5f, row_prime/z + 0.5f, imageId); // textures are not rotated
 					sum_Iprime_Iprime_row += (Iprime * Iprime);
 					sum_Iprime_row += Iprime;
-					sum_I_Iprime_row += (Iprime * refImg_I[refImg_I_Ind++]);
+					//sum_I_Iprime_row += (Iprime * refImg_I[refImg_I_Ind++]);
+					sum_I_Iprime_row += Iprime * refImg_I[refImg_I_Ind];
 					numOfPixels++;
 				}
 #ifdef HANDLE_BOUNDARY
 				++localColMinusHalfwindowPlusHalf;
 #endif
+				refImg_I_Ind++;
 				if(!isRotated)
 				{
 					z += transform[6];
@@ -854,9 +856,9 @@ __global__ void topToDown(float *matchCost, float *refImg, float *refImgI, float
 				// image id is i( id != -1). Test the id using NCC, with 3 different depth. 				
 				//if(imageId != -1)
 				{
-					cost[0] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight);			// accumulate the cost
-					cost[1] += accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col);
-					cost[2] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight);	
+					cost[0] += pow( computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight),2);			// accumulate the cost
+					cost[1] += pow(accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col),2);
+					cost[2] += pow( computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight),2);	
 				}
 			}	
 			// find the minimum cost id, and then put cost into global memory 
@@ -1034,9 +1036,9 @@ __global__ void downToTop(float *matchCost, float *refImg, float *refImgI, float
 				// image id is i( id != -1). Test the id using NCC, with 3 different depth. 				
 				//if(imageId != -1)
 				{
-					cost[0] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight);			// accumulate the cost
-					cost[1] += accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col);
-					cost[2] +=  computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight);
+					cost[0] +=  pow(computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight), 2);			// accumulate the cost
+					cost[1] +=  pow(accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col),2);
+					cost[2] +=  pow(computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight),2);
 				}
 			}	
 			// find the minimum cost id, and then put cost into global memory 
