@@ -3,6 +3,7 @@
 #include "utility_CUDA.h"
 #include "GaussianBlurCUDA.h"
 #include  <sstream> 
+#include <iomanip>
 
 #define MAX_WINDOW_SIZE	53 
 
@@ -291,6 +292,13 @@ void PatchMatch::runPatchMatch()
 	}
 }
 
+void saveDepth(Array2D_wrapper<float> *depthMap, int id)
+{
+	std::stringstream ss; 
+	ss << std::setw( 3 ) << std::setfill( '0' ) << id;
+	std::string fileName = "depthMap"+ ss.str() + ".txt";
+	depthMap->saveToFile(fileName);
+}
 
 template<int WINDOWSIZES> void PatchMatch::run()
 {
@@ -308,6 +316,14 @@ template<int WINDOWSIZES> void PatchMatch::run()
 	std::cout<< "totolNumber of shared memory used: " << totalNumOfSharedMemUsed << " bytes" << std::endl;
 	std::cout<< "totalNumber of dynamic shared: " << sizeOfdynamicSharedMemory << std::endl;
 	checkSharedMem(totalNumOfSharedMemUsed);
+
+	int saveId = 1;
+
+	{
+		saveDepth(_depthMap, saveId);
+		saveId++;
+	}
+
 	for(int i = 0; i < _numOfIterations; i++)
 	{
 	// left to right sweep
@@ -330,14 +346,23 @@ template<int WINDOWSIZES> void PatchMatch::run()
 			CudaCheckError();
 		}		
 		isRotated = true;
+
+		
 		topToDown<WINDOWSIZES><<<_gridSize, _blockSize, sizeOfdynamicSharedMemory>>>(_matchCostT->_array2D, _refImageT->_refImageData->_array2D,  _refImageT->_refImage_sum_I->_array2D, _refImageT->_refImage_sum_II->_array2D, _refImageT->_refImage_sum_I->_pitchData,
-			_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
-			_SPMapT->_array2D, _SPMapT->_pitchData, 
-			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
+				_depthMapT->getWidth(), _depthMapT->getHeight(), _depthMapT->_array2D, _depthMapT->_pitchData, 
+				_SPMapT->_array2D, _SPMapT->_pitchData, 
+				numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
+		
 		delete _SPMapT; _SPMapT = NULL;
+		
 ////----------------------------------------------------------------------------------------------
-//	// top to bottom sweep 
+//	// top to bottom sweep 	
 		transposeBackward();
+		{
+			saveDepth(_depthMap, saveId);
+			saveId++;
+		}		
+
 		_SPMap = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y, _numOfTargetImages);
 		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), N, 1);
 		isRotated = false;
@@ -349,6 +374,11 @@ template<int WINDOWSIZES> void PatchMatch::run()
 		delete _SPMap; _SPMap = NULL;
 
 	//////////// right to left sweep
+		{
+			saveDepth(_depthMap, saveId);
+			saveId++;
+		}
+
 		transposeForward();
 		computeCUDAConfig(_depthMapT->getWidth(), _depthMapT->getHeight(), N, 1);
 		isRotated = true;
@@ -362,6 +392,11 @@ template<int WINDOWSIZES> void PatchMatch::run()
 		
 	//////// bottom to top sweep
 		transposeBackward();
+		{
+			saveDepth(_depthMap, saveId);
+			saveId++;
+		}
+
 		_SPMap = new Array2D_wrapper<float>(_refWidth, _refHeight, _blockDim_x, _blockDim_y, _numOfTargetImages);
 		computeCUDAConfig(_depthMap->getWidth(), _depthMap->getHeight(), N, 1);
 		isRotated = false;
@@ -370,10 +405,15 @@ template<int WINDOWSIZES> void PatchMatch::run()
 			_SPMap->_array2D, _SPMap->_pitchData,
 			numOfSamples, _psngState->_array2D, _psngState->_pitchData, _nearRange, _farRange, _halfWindowSize, isRotated, _numOfTargetImages, SPMAlphaSquare);
 		delete _SPMap; _SPMap = NULL;
+
+		{
+			saveDepth(_depthMap, saveId);
+			saveId++;
+		}
+
 		t.stopRecord();
 
-	}
-	
+	}	
 	/*for(int i = 0; i< _numOfTargetImages; i++)
 	{
 		std::stringstream ss; ss<<i;
@@ -382,6 +422,8 @@ template<int WINDOWSIZES> void PatchMatch::run()
 	}*/
 	std::cout<< "ended " << std::endl;
 }
+
+
 
 inline __device__ float accessPitchMemory(float *data, int pitch, int row, int col)
 {
@@ -856,9 +898,9 @@ __global__ void topToDown(float *matchCost, float *refImg, float *refImgI, float
 				// image id is i( id != -1). Test the id using NCC, with 3 different depth. 				
 				//if(imageId != -1)
 				{
-					cost[0] += pow( computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight),2);			// accumulate the cost
-					cost[1] += pow(accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col),2);
-					cost[2] += pow( computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight),2);	
+					cost[0] += pow( computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight),1);			// accumulate the cost
+					cost[1] += pow(accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col),1);
+					cost[2] += pow( computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II, imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight),1);	
 				}
 			}	
 			// find the minimum cost id, and then put cost into global memory 
@@ -868,14 +910,16 @@ __global__ void topToDown(float *matchCost, float *refImg, float *refImgI, float
 
 			int idx = findMinCost(cost);
 			float bestDepth = depth_array[threadId + N * idx];
+				
 			writePitchMemory(depthMap, depthMapPitch, row, col, bestDepth);
+	
 			// swap depth former and depth current
 			depth_former_array[threadId] = bestDepth;
 			// Here I need to calculate SPMap based on the best depth, and put it into SPMap
 			//float variance_inv = 1.0/(0.2 * 0.2);
-			// compute the cost for bestDepth
+			// compute the cost for bestDepth 
 			for(int imageId = 0; imageId < _numOfTargetImages; imageId ++)
-			{
+			{ 
 				if(idx != 1)
 				{	
 					cost[0] = computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, bestDepth, isRotated, halfWindowSize, refImageWidth, refImageHeight);
@@ -1036,9 +1080,9 @@ __global__ void downToTop(float *matchCost, float *refImg, float *refImgI, float
 				// image id is i( id != -1). Test the id using NCC, with 3 different depth. 				
 				//if(imageId != -1)
 				{
-					cost[0] +=  pow(computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight), 2);			// accumulate the cost
-					cost[1] +=  pow(accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col),2);
-					cost[2] +=  pow(computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight),2);
+					cost[0] +=  pow(computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, depth_former_array[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight), 1);			// accumulate the cost
+					cost[1] +=  pow(accessPitchMemory(matchCost, SPMapPitch, row + imageId * refImageHeight, col),1);
+					cost[2] +=  pow(computeNCC<WINDOWSIZES>(threadId, refImg_I, refImg_sum_I, refImg_sum_II,imageId, rowMinusHalfwindowPlusHalf, colMinusHalfwindowPlusHalf, randDepth[threadId], isRotated, halfWindowSize, refImageWidth, refImageHeight),1);
 				}
 			}	
 			// find the minimum cost id, and then put cost into global memory 
